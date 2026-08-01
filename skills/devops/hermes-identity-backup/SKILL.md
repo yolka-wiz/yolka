@@ -44,5 +44,6 @@ Snapshot a Hermes profile's identity (SOUL, soul.json, config, secrets, memories
 - `read_file` refuses `.env` — use `cat`/`grep -oE '^[A-Z_]+='` to inspect keys only.
 - Hermes CLI version drift is the top reincarnation risk — pin `VERSION` file (version + upstream commit) and document `git checkout <commit>` fallback.
 - `hermes profile create` in restore.sh only runs when the profile dir is absent; in dry-run tests pre-create it to avoid touching the real home.
+- **HERMES_HOME quirk on this host:** the runtime sets `HERMES_HOME=.../profiles/devops` (the profile dir itself, not the config root). Scripts must normalize: if the parent dir is named `profiles`, walk up two levels. `basename "$PATH/.."` does NOT resolve `..` — use `basename "$(cd "$PATH/.." && pwd)"`.
 - `.env`/`auth.json`/`MEMORY.md` contain live production secrets — repo must stay private; warn user to rotate on exposure.
 - Exclude from repo: `state.db`/`sessions/` (chat history, optional manual copy), `workspace/venv` (reproduced by hermes install), skill cache internals.
