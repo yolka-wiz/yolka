@@ -7,9 +7,9 @@ set -euo pipefail
 
 PROFILE_NAME="${1:-devops}"
 HERMES_HOME="${2:-${HERMES_HOME:-$HOME/.hermes}}"
-# Normalize: HERMES_HOME may point at the config root OR directly at the
+# Normalize: HERMES_HOME may point at the config root OR directly at a
 # profile dir (this host sets HERMES_HOME=.../profiles/devops in-session).
-if [ -f "$HERMES_HOME/SOUL.md" ] && [ "$(basename "$(cd "$HERMES_HOME/.." && pwd)")" = "profiles" ]; then
+if [ "$(basename "$(cd "$HERMES_HOME/.." && pwd)")" = "profiles" ]; then
   HERMES_HOME="$(cd "$HERMES_HOME/../.." && pwd)"
 fi
 SRC="$HERMES_HOME/profiles/$PROFILE_NAME"
