@@ -1,0 +1,5 @@
+# yolka identity repo — nothing excluded except git internals
+.git/
+*.lock
+ticker_heartbeat
+ticker_last_success

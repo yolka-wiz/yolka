@@ -1,0 +1,9 @@
+{
+  "last_report_path": "/home/agent/.hermes/profiles/devops/logs/curator/20260801-113059",
+  "last_run_at": "2026-08-01T11:30:59.928499+00:00",
+  "last_run_duration_seconds": 0.645368,
+  "last_run_summary": "auto: no changes; llm: skipped (consolidation off)",
+  "last_run_summary_shown_at": null,
+  "paused": false,
+  "run_count": 2
+}

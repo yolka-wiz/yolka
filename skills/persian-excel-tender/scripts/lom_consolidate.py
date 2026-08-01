@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""
+LOM Consolidator — Transform multi-sheet LOM (List of Materials) Excel files
+into Mohaimen-style single-sheet format with section headers.
+
+STRUCTURAL TRANSFORMATION:
+  1. CONSOLIDATE → All sheets merged into one sheet named after the source
+  2. SECTIONS → Each sheet becomes a merged A:F header row (22pt bold)
+     with data below (18pt regular, center-center, wrap=ON)
+  3. HEADERS → Single header row (12pt bold, no fill)
+  4. COLUMNS → A-F (ردیف, تجهیزات, توضیحات, مقدار, واحد, برند) + G-N empty
+     with dark blue fill (FF0070C0) on G1:N1
+  5. BORDERS → Thin on all sides for every cell
+  6. TITLE → First row merged A:F (20pt bold)
+  7. ROW GROUPING → All data rows grouped (outline_level=1) per section
+  8. PAGE SETUP → Landscape A4, print area set to A:F
+
+Usage:
+  python lom_consolidate.py <input.xlsx> [options]
+
+Options:
+  --output <path>    Output path (default: ~/Desktop/<stem>-Mohaimen.xlsx)
+  --sheet-name <s>   Target sheet name (default: cleaned filename)
+  --order <order>    Comma-separated section order using sheet name substrings
+                     e.g. "MECH,CIVIL,ACS,POWER,FAS,FES,CCTV,PASSIVE"
+                     (default: source workbook sheet order)
+"""
+
+import sys, os, re
+from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
+
+THIN = Side(style='thin')
+THIN_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+TITLE_FONT    = Font(name='Calibri', size=20, bold=True)
+HEADER_FONT   = Font(name='Calibri', size=12, bold=True)
+SECTION_FONT  = Font(name='Calibri', size=22, bold=True)
+DATA_FONT     = Font(name='Calibri', size=18, bold=False)
+CENTER_WRAP   = Alignment(horizontal='center', vertical='center', wrap_text=True)
+TEMPLATE_FILL = PatternFill(start_color='FF0070C0', end_color='FF0070C0', fill_type='solid')
+
+COL_HEADERS   = ['ردیف', 'تجهیزات', 'توضیحات', 'مقدار', 'واحد', 'برند']
+
+COL_WIDTHS = {
+    'A': 8.6640625, 'B': 112.0,       'C': 41.6640625, 'D': 12.5546875,
+    'E': 14.33203125, 'F': 22.33203125,
+    'G': 9.109375, 'H': 13.0, 'I': 13.0, 'J': 13.0,
+    'K': 13.0, 'L': 13.0, 'M': 13.0, 'N': 13.0,
+}
+
+SECTION_NAMES = {
+    'civil': 'بخش عمران', 'mech': 'بخش مکانیک', 'mechanical': 'بخش مکانیک',
+    'power': 'بخش POWER',
+    'acs': 'بخش اکسس کنترل',
+    'cctv': 'بخش CCTV',
+    'passive': 'بخش PASSIVE',
+    'fas': 'بخش FAS', 'firefighting': 'بخش FAS',
+    'fes': 'بخش FES',
+}
+
+def derive_section_name(sheet_name):
+    stem = re.sub(r'[-_\s]*(LOM|LOS)\s*$', '', sheet_name.strip(), flags=re.I).strip()
+    key = stem.lower().replace('-', '').replace(' ', '').replace('_', '')
+    return SECTION_NAMES.get(key, f'بخش {stem}')
+
+def _cell(ws, row, col, value, font, alignment, border=THIN_BORDER):
+    c = ws.cell(row=row, column=col, value=value)
+    c.font = font; c.alignment = alignment; c.border = border
+    return c
+
+def _write_header(ws, row):
+    for i, h in enumerate(COL_HEADERS, 1):
+        _cell(ws, row, i, h, HEADER_FONT, CENTER_WRAP)
+    for c in range(7, 15):
+        _cell(ws, row, c, None, HEADER_FONT, CENTER_WRAP)
+
+def _write_section(ws, row, text):
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+    _cell(ws, row, 1, text, SECTION_FONT, CENTER_WRAP)
+    for c in range(2, 15):
+        _cell(ws, row, c, None, SECTION_FONT, CENTER_WRAP)
+
+def _write_data(ws, row, values):
+    padded = list(values) + [None] * (6 - len(values))
+    for i, v in enumerate(padded, 1):
+        _cell(ws, row, i, v, DATA_FONT, CENTER_WRAP)
+    for c in range(7, 15):
+        _cell(ws, row, c, None, DATA_FONT, CENTER_WRAP)
+
+def _read_sheet_data(src, sheet_name):
+    ws = src[sheet_name]
+    return [list(r[:6]) for r in ws.iter_rows(min_row=3, values_only=True)
+            if any(v is not None for v in r)]
+
+def consolidate(input_path, output_path, sheet_name=None, section_order=None):
+    src = load_workbook(input_path)
+    dst = Workbook()
+    ws = dst.active
+
+    stem = os.path.splitext(os.path.basename(input_path))[0]
+    ws.title = (sheet_name or re.sub(r'[-\s]+', '_', stem))[:31]
+
+    for letter, w in COL_WIDTHS.items():
+        ws.column_dimensions[letter].width = w
+
+    all_sheets = src.sheetnames
+    if section_order:
+        ordered = []
+        for item in section_order:
+            item = item.strip()
+            if item.isdigit():
+                idx = int(item)
+                if 0 <= idx < len(all_sheets):
+                    ordered.append(all_sheets[idx])
+            else:
+                ordered.extend(s for s in all_sheets if item.lower() in s.lower())
+        seen = set(ordered)
+        ordered.extend(s for s in all_sheets if s not in seen)
+    else:
+        ordered = list(all_sheets)
+
+    row = 1
+    title = src[ordered[0]].cell(row=1, column=1).value or 'لیست تجهیزات'
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
+    _cell(ws, 1, 1, title, TITLE_FONT, CENTER_WRAP)
+    for c in range(2, 15):
+        _cell(ws, 1, c, None, TITLE_FONT, CENTER_WRAP)
+    for c in range(7, 15):
+        ws.cell(row=1, column=c).fill = TEMPLATE_FILL
+    row += 1
+
+    _write_header(ws, row)
+    row += 1
+
+    for sname in ordered:
+        data = _read_sheet_data(src, sname)
+        if not data:
+            continue
+        _write_section(ws, row, derive_section_name(sname))
+        section_start = row + 1
+        row += 1
+        for d in data:
+            _write_data(ws, row, d)
+            row += 1
+        for r in range(section_start, row):
+            ws.row_dimensions[r].outline_level = 1
+
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.paperSize = 9
+    ws.print_area = f"'{ws.title}'!$A$1:$F${row - 1}"
+
+    dst.save(output_path)
+    src.close()
+    dst.close()
+    print(f"✅ {output_path}  ({row-1} rows, 14 columns)")
+    return output_path
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
+        print(__doc__); sys.exit(0)
+    input_path = sys.argv[1]
+    if not os.path.exists(input_path):
+        print(f"❌ File not found: {input_path}"); sys.exit(1)
+    output_path = None; sheet_name = None; section_order = None
+    args = sys.argv[2:]
+    while args:
+        arg = args.pop(0)
+        if arg == '--output' and args:       output_path = args.pop(0)
+        elif arg == '--sheet-name' and args: sheet_name = args.pop(0)
+        elif arg == '--order' and args:      section_order = [x.strip() for x in args.pop(0).split(',')]
+    if not output_path:
+        stem = os.path.splitext(os.path.basename(input_path))[0]
+        output_path = os.path.join(os.path.expanduser('~'), 'Desktop', f'{stem}-Mohaimen.xlsx')
+    consolidate(input_path, output_path, sheet_name, section_order)

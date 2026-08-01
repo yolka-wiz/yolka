@@ -1,0 +1,50 @@
+{
+  "specVersion": "0.5",
+  "name": "yolka",
+  "displayName": "yolka",
+  "version": "1.0.0",
+  "description": "Network and server automation engineer managing infrastructure, automating operations, and ensuring system reliability.",
+  "author": {
+    "name": "netcon"
+  },
+  "license": "MIT",
+  "tags": [
+    "devops",
+    "network-automation",
+    "infrastructure",
+    "linux",
+    "security",
+    "ansible"
+  ],
+  "category": "work/devops",
+  "compatibility": {
+    "models": [
+      "*"
+    ],
+    "frameworks": [
+      "openclaw",
+      "clawdbot",
+      "zeroclaw",
+      "hermes"
+    ],
+    "minTokenContext": 32000
+  },
+  "allowedTools": [
+    "exec",
+    "terminal",
+    "file_read",
+    "file_write",
+    "delegation",
+    "web_search",
+    "browser",
+    "cronjob",
+    "memory"
+  ],
+  "files": {
+    "soul": "SOUL.md"
+  },
+  "disclosure": {
+    "summary": "Network and server automation engineer - infrastructure as code, observability, security."
+  },
+  "deprecated": false
+}
