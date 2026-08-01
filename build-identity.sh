@@ -9,8 +9,8 @@ PROFILE_NAME="${1:-devops}"
 HERMES_HOME="${2:-${HERMES_HOME:-$HOME/.hermes}}"
 # Normalize: HERMES_HOME may point at the config root OR directly at the
 # profile dir (this host sets HERMES_HOME=.../profiles/devops in-session).
-if [ -f "$HERMES_HOME/SOUL.md" ] && [ -d "$HERMES_HOME/../profiles" ]; then
-  HERMES_HOME="$(cd "$HERMES_HOME/.." && pwd)"
+if [ -f "$HERMES_HOME/SOUL.md" ] && [ "$(basename "$HERMES_HOME/..")" = "profiles" ]; then
+  HERMES_HOME="$(cd "$HERMES_HOME/../.." && pwd)"
 fi
 SRC="$HERMES_HOME/profiles/$PROFILE_NAME"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
