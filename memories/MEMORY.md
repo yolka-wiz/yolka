@@ -19,3 +19,5 @@ OpenBao v2.6.1 Docker on core-srv :8200. Root token: s.l5pNqhyBU3WJQXn2Pkue432f.
 WANs 10700-10702, src /opt/viberoxy. 8082 mirror & 30000 dashboard down.
 §
 Agent is its own GitHub user yolka-wiz (id 311797743): fork→push→PR workflow, dedicated GitHub SSH key registered with GH, fork remote at git@github.com:yolka-wiz/. GitHub MCP server registered (tools need new session). PAT in devops profile mcp config.
+§
+Identity backup: private repo yolka-wiz/yolka (checkout /home/agent/yolka-identity). build-identity.sh refreshes snapshot from profile; restore.sh reincarnates on new server. GitHub PAT deliberately redacted → placeholder in repo.
