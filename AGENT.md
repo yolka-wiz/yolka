@@ -85,6 +85,14 @@ hermes -p yolka skills opt-out   # if --no-skills wasn't available
 
 Verify count: `ls "$PROFILE/skills" | wc -l` should match the repo.
 
+**Live-linking alternative:** instead of copying, register the repo as an
+external skill directory — the repo stays the source of truth and `git pull`
+updates the library in place:
+
+```bash
+hermes config set -p yolka skills.external_dirs '["/path/to/yolka/skills"]'
+```
+
 ## 5. Configure the model provider
 
 `config.yaml` ships with a working default (opencode-go) but **no secrets**. The

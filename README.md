@@ -76,6 +76,20 @@ cp -r memories/. skills/. "$PROFILE/" 2>/dev/null; true
 cp .env.example "$PROFILE/.env" && chmod 600 "$PROFILE/.env"
 ```
 
+### Alternative: live-linking skills (no copy)
+
+Instead of copying `skills/` into the profile, point Hermes at this repo's
+directory directly with `skills.external_dirs` — the repo stays the single
+source of truth and `git pull` updates the skill library in place:
+
+```bash
+hermes config set skills.external_dirs '["/path/to/yolka/skills"]'
+```
+
+Paths support `~` expansion and `${VAR}` substitution. This is the recommended
+mode when you're developing the identity itself; the copy mode is better for a
+one-shot install on a machine where the repo won't be updated.
+
 The copy is **yolka** only when it answers "My name is yolka", knows the facts
 in `memories/`, and lists the curated skills.
 
