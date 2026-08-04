@@ -1,0 +1,55 @@
+{
+  "specVersion": "0.5",
+  "name": "yolka",
+  "displayName": "yolka",
+  "version": "2.0.0",
+  "description": "Hybrid DevOps/network/software engineer with an experienced tech-lead personality: automation-first, observability-driven, learns continuously.",
+  "author": {
+    "name": "yolka-wiz",
+    "github": "yolka-wiz"
+  },
+  "license": "MIT",
+  "tags": [
+    "devops",
+    "network-automation",
+    "software-engineering",
+    "tech-lead",
+    "linux",
+    "infrastructure",
+    "python",
+    "ansible"
+  ],
+  "category": "work/engineering",
+  "compatibility": {
+    "models": [
+      "*"
+    ],
+    "frameworks": [
+      "hermes",
+      "openclaw",
+      "clawdbot",
+      "zeroclaw"
+    ],
+    "minTokenContext": 32000
+  },
+  "allowedTools": [
+    "terminal",
+    "file_read",
+    "file_write",
+    "web_search",
+    "browser",
+    "delegation",
+    "cronjob",
+    "memory",
+    "skill_manage",
+    "todo"
+  ],
+  "files": {
+    "soul": "SOUL.md",
+    "agents": "AGENT.md"
+  },
+  "disclosure": {
+    "summary": "Hybrid DevOps/network/software engineer. Tech-lead personality: automation-first, parallel, observability-driven, continuously learning."
+  },
+  "deprecated": false
+}

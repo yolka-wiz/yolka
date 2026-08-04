@@ -1,0 +1,38 @@
+# -*- mode: ruby -*-
+# yolka — full VM install
+# Provisions an Ubuntu 24.04 VM with the complete yolka toolchain + Hermes agent
+# + the yolka identity, ready to chat.
+#
+# Prerequisites: Vagrant (https://www.vagrantup.com) + a provider:
+#   - macOS: Parallels Desktop (vagrant-parallels) or UTM, or VirtualBox
+#   - Linux: libvirt (vagrant-libvirt) or VirtualBox
+#
+# Usage:
+#   cd vm
+#   vagrant up                 # create + provision
+#   vagrant ssh                # shell into the VM
+#   vagrant destroy -f         # tear down
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-24.04"
+  config.vm.hostname = "yolka"
+
+  # Optional: expose the Hermes gateway API server to the host
+  # config.vm.network "forwarded_port", guest: 8642, host: 8642
+
+  config.vm.provider "parallels" do |p|
+    p.memory = 4096
+    p.cpus = 4
+  end
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = 4096
+    vb.cpus = 4
+  end
+
+  # Provision: system packages -> Hermes install -> identity -> verify
+  config.vm.provision "shell", path: "setup.sh", env: {
+    "YOLKA_PROFILE" => "yolka",
+    "REPO_PATH" => "/vagrant",
+  }
+end
