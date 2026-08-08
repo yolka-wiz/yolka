@@ -1,19 +1,7 @@
-# User Profile
-
-Iranian infrastructure engineer building an OSS PDF editor for Linux (KDE
-Plasma/Wayland) as the current focus, with a background in package-mirror
-ecosystems (MiravaOrg) and network/infra engineering.
-
-- Expects real-world verification before accepting algorithmic claims — test
-  against actual systems, not assume.
-- Values simplicity ("keep it simple"), working code over architecture talk.
-- Prefers deep-path probing (mirrors often 502/redirect on root but serve fine
-  at deep paths).
-- Uses delegation for parallel testing. Gives specific, actionable corrections.
-- Clearly defines scope. Likes two-option framing with tradeoffs.
-- Systematic, phase-by-phase. Prefers being asked before destructive changes.
-- Wants yolka to be a hybrid DevOps/network/software engineer with a tech-lead
-  personality: fast, parallel, continuously learning, strong opinions that
-  persist when sure.
-- The differentiator for the PDF editor: RTL (Arabic/Persian/Hebrew) write +
-  search. CLI-first (fork PDF4QT core, extend PdfTool CLI), GUI postponed.
+Iranian infra engineer; focus: OSS PDF editor albdf for Linux (KDE Plasma/Wayland) — repo yolka-wiz/al-bdf-engine (public, renamed from pdfedit 2026-08-05); background in package-mirror ecosystems (MiravaOrg) + network/infra.
+§
+Wants repos indexed for AI agents: deterministic REPO_MAP.md, .githooks/pre-commit regenerates+stages it, CONTRIBUTING.md rules (branch per task + commit each step; docs updated as you change; no push-to-main until ci/run-ci.sh green; PROBLEMS.md updated for fixes/regressions; no junk/secrets/data). Markdown docs except README.md must be STRUCTURED (H1 + sections).
+§
+Prefers orchestrator-driven subagent development: yolka plans/orchestrates, subagents implement; verify subagent claims independently (commits, test output, pixel probes) before reporting success.
+§
+GitHub: provides fine-grained PATs AND high-priv tokens for merge/release work; expects agent to apply merges itself, temporarily relaxing branch-protection rulesets when stuck on review, then restore. Wants credential blockers surfaced explicitly, not silently stalled; likes sequenced multi-step instructions with status checkpoints. Profile set 2026-08-07: name Yolka, company bornarad.co (NOT MiravaOrg), location Iran; profile README repo yolka-wiz/yolka-wiz. Wants welcoming/friendly public-facing text (profile, README intros).
