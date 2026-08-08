@@ -1,6 +1,3 @@
-# yolka identity repo — nothing except git internals is excluded by design;
-# secrets simply never enter the tree (see build-identity.sh scrub + .env.example).
-.git/
-*.lock
-ticker_heartbeat
-ticker_last_success
+secrets.yaml
+*.plain
+.env

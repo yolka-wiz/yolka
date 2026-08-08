@@ -489,6 +489,19 @@ assess whether an upstream PR is viable. Full session record + strategy:
 `references/upstream-contribution-feasibility-2026-08-08.md`; re-runnable audit probe:
 `scripts/upstream-contribution-audit.sh`.
 
+## 10. Server-migration handoff (stop dev → everything remote on GitHub)
+
+When the user says "stop the development / upload the full current plan and
+issues and updated db to github / we want to move you to a better server /
+make sure everything is remote / create a repo for exporting your profile" —
+full exact-command sequence, WIP preservation, gitignored-DB export via a
+dedicated `handoff-migration` branch, plan-docs copy, profile-repo refresh,
+secret-hygiene grep, and the final verification loop (ls-remote + SQLite
+header probe, never trust a push line alone):
+`references/server-migration-handoff-2026-08-08.md`. Full session record + strategy:
+`references/upstream-contribution-feasibility-2026-08-08.md`; re-runnable audit probe:
+`scripts/upstream-contribution-audit.sh`.
+
 **Upstream facts (verified via GitHub API, 2026-08-08):**
 - Repo is `JakubMelka/PDF4QT` — `Jacques/PDF4QT` is a 404. Default branch `master`.
 - **MIT** (relicensed from LGPLv3 on 2025-04-27); README §5: contributions welcome, **no CLA**.
@@ -578,6 +591,13 @@ GUI wiring only if #2 lands. If upstream says no, the patches live forever in th
   version bump + hardcoded-version smoke trap, RELEASES.md/PLAN.md updates, full gate,
   deterministic tarball (build twice → identical sha256), annotated tag + push,
   `gh release create` with assets, and the fine-grained-PAT Contents:write gotcha.
+  **`gh release create` needs `--repo <owner>/<repo>` in a fork clone** (hit
+  2026-08-07, 0.3.0): with an `upstream` remote present, gh targets the UPSTREAM
+  repo for the Release object and fails with `tag 0.3.0 exists locally but has not
+  been pushed to JakubMelka/PDF4QT ... specify the --target flag` even though the
+  tag is on the fork. Fix: `gh release create 0.3.0 <assets> --repo
+  yolka-wiz/al-bdf-engine --title ... --notes ...` — then verify assets by
+  re-downloading and comparing sha256 (never trust the create response alone).
 - `references/feature-capability-map-2026-08-07.md` — what the vendored PDF4QT core
   already provides (PDFAnnotation create API, PDFDocumentTextFlow editing, image
   optimizer/compressor, page manipulator) vs what albdf exposes via CLI — the answer to
