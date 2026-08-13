@@ -203,6 +203,45 @@ push) is verified by the orchestrator before the next phase starts.
      tests. (Hit 2026-08-06: 4-branch merge into albdf main; gate caught my
      CMake resolution error on the first run; fixed, re-gated green.)
 
+- **A forced STOP ("stop development", "we're moving to a better server") is
+  a PRESERVATION problem, not a cleanup problem — make the remote the single
+  source of truth before the machine disappears.** The orchestrator's last
+  act when a milestone is interrupted mid-flight for a server migration is a
+  handoff sequence, not a merge-and-release:
+  1. **Commit every child's uncommitted WIP as explicit `wip(<ws>): ...`
+     commits on the FEATURE branches, never main** — a cap-hit child's
+     116-line GREEN implementation must not be lost. The commit message says
+     "in progress, handoff" and states exactly what is done vs not (e.g.
+     "RED committed; GREEN impl WIP, not yet built/verified").
+  2. **Push ALL branches** (main + m14/* + a new handoff branch) so the new
+     server can `git fetch origin` and resume. Do NOT merge unfinished
+     branches — resume on the new machine, don't fake completion.
+  3. **Record open tasks in the tracking DB with handoff notes** (branch
+     name, what's done/what's not, priority) — the DB is the issue tracker;
+     open-with-notes is the honest state, not a failure.
+  4. **Write a HANDOFF doc into the repo** (`plans/handoff/<date>-handoff.md`):
+     repos table, branch→task map, resume checklist (clone → fetch → DB
+     restore command → finish the WIP branch first), credentials policy
+     (tokens live in ~/.config/gh/hosts.yml, copy not commit), open items.
+     Commit + push to main.
+  5. **The gitignored tracking DB needs an explicit remote path**: force-add
+     it on a dedicated `handoff-migration` branch
+     (`git add -f db/albdf.db && git commit && git push`), then document the
+     restore command in the handoff doc:
+     `git show origin/handoff-migration:db/albdf.db > db/albdf.db`.
+  6. **Verify the remote state independently before declaring done** —
+     `git ls-remote --heads origin` lists the branches, `git show
+     origin/handoff-migration:db/albdf.db | head -c 16` prints the SQLite
+     header, `git log --oneline origin/<branch> -1` shows the WIP commits
+     landed. Only then tell the user "everything is remote" with the exact
+     resume commands.
+  (Hit 2026-08-08: M14 dispatch interrupted for server migration — two
+  worktree branches with uncommitted WIP, tasks #41/#42 opened with handoff
+  notes, handoff doc + handoff-migration branch pushed, remote verified via
+  ls-remote + git show header checks. The new server resumes by cloning,
+  fetching, restoring the DB from the handoff branch, and finishing
+  m14/freetext-ap first.)
+
 ## Gates that work
 
 | Phase | Gate example |

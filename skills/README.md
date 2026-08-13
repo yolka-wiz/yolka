@@ -46,6 +46,38 @@ actually reaches for.
 - `persian-rtl-documents` — Persian/Arabic OCR, reshaping, bidi, RTL PDF creation
   (deduplicated in this snapshot).
 
+## SRE / cloud / sysadmin expansion (2026-08-13)
+Sourced from ClawHub, skills.sh (Trail of Bits), GitHub (antonbabenko, keep-the-why),
+plus two custom-authored skills. Goal: full SRE/cloud coverage + engineering mindset.
+- `sysadmin` (ClawHub; manual install — blocked by skills-guard keyword scan, content
+  manually reviewed, benign best-practice text) — users, processes, storage, maintenance.
+- `systemd` (ClawHub) — systemd reference for sysops.
+- `k8s` (ClawHub) — kubectl operations against any cluster (kubeconfig-based).
+- `terraform-skill` (antonbabenko/terraform-skill, Apache-2.0) — Terraform/OpenTofu
+  diagnose-first workflow + 8 reference files. Preferred over ClawHub's vendor-locked
+  `oo-terraform` (OOMOL connector — rejected).
+- `ansible` (ClawHub) — server provisioning, config management, orchestration.
+- `observability` (ClawHub) — metrics/logs/traces mental model, instrumentation budget.
+- `incident` (ClawHub) — detect/triage/mitigate/communicate during outages.
+- `postmortems` (ClawHub) — deep blameless postmortem workflow.
+- `backup` (ClawHub; manual install) — 3-2-1 rule, tested restores, ransomware protection.
+- `differential-review` (Trail of Bits via skills.sh) — security-focused diff review.
+- `architecture-decision-record-drafter` (ClawHub) — MADR-style ADRs under docs/adr/.
+- `ai-tech-lead` (ClawHub) — 4-phase Research→Design→Planning→Code methodology
+  (frontmatter added post-fetch; source had none).
+- `keep-the-why` (oliver-zehentleitner/keep-the-why, MIT) — preserve decision
+  rationale/workarounds the code can't explain; continuous capture + recovery modes.
+- `new-stack-onboarding` (custom) — systematic onboarding to unfamiliar stacks:
+  canonical docs → hello-world → idioms → persisted stack note; environment-first
+  tool discovery.
+- `cs-fundamentals` (custom) — compact CS basics reference: complexity, data
+  structures, OS, concurrency, networking, databases, systems design.
+
+Rejected after review: `oo-terraform` (vendor-locked to OOMOL), ClawHub `computer-science`
+(a tutoring skill, not an agent knowledge base — replaced by custom `cs-fundamentals`),
+`observability` skills.sh variant (ClawHub version chosen), persona-heavy skills with
+no procedure.
+
 ## Explicitly NOT included (and why)
 - The 72 never-used bundled skills (airtable, apple-*, creative/* except where
   relevant, mlops/*, research/paper-writing, …) — dead weight that pollutes the

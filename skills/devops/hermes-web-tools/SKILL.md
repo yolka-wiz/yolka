@@ -61,6 +61,11 @@ fallback below instead of declaring extraction dead.
 curl -sSL -m 20 -o /tmp/page.md https://raw.githubusercontent.com/<owner>/<repo>/main/README.md
 ```
 - Prefer raw/plain-text URLs (raw.githubusercontent, docs markdown files).
+- **Mintlify/llms.txt docs sites**: fetch `https://<docs-site>/llms.txt` for the full
+  page index, then any page as `https://<docs-site>/<path>.md` — clean markdown via
+  plain curl, no extract backend needed. Verified 2026-08 on docs.phidata.com
+  (`curl -sL https://docs.phidata.com/workflows.md`). Try this for ANY vendor docs
+  before declaring extraction dead.
 - Add `-x socks5h://<host>:<port>` when the target blocks direct egress.
 - `curl -I` (HEAD) lies on API endpoints (403/405) — probe with GET.
 

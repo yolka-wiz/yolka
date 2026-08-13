@@ -1,59 +1,50 @@
-# yolka — profile config (sanitized; no secrets — secrets live in .env)
-# This is a working baseline: deepseek-v4-flash via opencode-go, standard
-# toolsets, no gateway enabled. Adjust with `hermes config set`, not by hand.
-#
-# _config_version is managed by Hermes; bump only via the CLI.
-
 model:
   default: deepseek-v4-flash
   provider: opencode-go
   base_url: https://opencode.ai/zen/go/v1
   api_mode: chat_completions
-
 agent:
   max_turns: 150
-
+  reasoning_effort: low
 web:
   backend: ddgs
   use_gateway: false
-
+auxiliary:
+  vision:
+    provider: opencode-go
+    model: mimo-v2.5-pro
 display:
   tool_progress: all
-
 tts:
   use_gateway: false
-
 gateway:
   platforms:
     api_server:
-      enabled: false          # enable + add API_SERVER_KEY in .env when exposing
-
+      enabled: false
+_config_version: 33
 platform_toolsets:
   cli:
-    - browser
-    - clarify
-    - code_execution
-    - cronjob
-    - delegation
-    - file
-    - image_gen
-    - memory
-    - session_search
-    - skills
-    - terminal
-    - todo
-    - tts
-    - vision
-    - web
-
-# ── Security ──────────────────────────────────────────────────────────
-# Secret redaction is ON by default. Set redact_secrets: false only when
-# developing the redactor itself.
-# security:
-#   redact_secrets: true
-
-# ── Fallback Model ────────────────────────────────────────────────────
-# Uncomment and configure to enable automatic failover (429/529/503).
-# fallback_model:
-#   provider: openrouter
-#   model: anthropic/claude-sonnet-4
+  - browser
+  - clarify
+  - code_execution
+  - cronjob
+  - delegation
+  - file
+  - image_gen
+  - memory
+  - session_search
+  - skills
+  - terminal
+  - todo
+  - tts
+  - vision
+  - web
+mcp_servers:
+  context7:
+    url: https://mcp.context7.com/mcp
+    headers:
+      Authorization: Bearer ctx7sk-2c7fa156-7263-4e9a-95ac-ef0417f28179
+plugins:
+  enabled:
+  - platforms/a2a
+  disabled: []

@@ -68,6 +68,20 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
   lands on the WRONG branch — check `git branch --show-current`, then
   `git cherry-pick` onto the PR branch) are in the `qt-cmake-vcpkg-build`
   skill §13 (hit twice, 2026-08-06/07).
+- **Backslash-counting through tool output is UNRELIABLE — use od/hex
+  (hit 2026-08-08, third occurrence).** The `patch` tool doubled `\.` →
+  `\\.` in `ci/run-ci.sh` exclusion regexes, and counting backslashes via
+  terminal JSON output (`repr()`, `grep | cat -A`) gave 2/3/4/5 depending
+  on escaping layers — I burned several attempts on wrong byte patterns.
+  The definitive diagnosis: `grep 'pdftextlayout' ci/run-ci.sh | od -c`
+  (shows `\ . c p p` = ONE backslash) vs `\ \ . c p p` (TWO = broken).
+  The definitive fix, no escaping ambiguity: read bytes in Python, replace
+  `bytes.fromhex('5c5c2e')` (two backslashes + dot) → `bytes.fromhex('5c2e')`
+  (one backslash + dot) for all affected pattern lines, then `od -c` to
+  confirm. **The semantics of the regex only work with ONE backslash** —
+  `\\.` in the file means literal-backslash-then-any-char, which excludes
+  nothing. After ANY patch to regex lines, test the exclusion functionally:
+  `echo 'src/.../pdffont.cpp' | grep -vE '<pattern>'` must return rc=1.
 - The pre-commit hook regenerates `REPO_MAP.md`; let it ride along in the commit.
 
 ## 4. CLI integration tests (Qt Test, QProcess)
@@ -87,6 +101,16 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
   child with `ulimit -v <bytes>` so it fails fast (bad_alloc / empty output) instead of
   OOM-killing the test host or thrashing for the full timeout.
 - Determinism: hash outputs with `QCryptographicHash::Sha256` and compare across two runs.
+- **`ctest -R` is CASE-SENSITIVE** (hit 2026-08-08): `ctest --test-dir src/build -R rtlfree`
+  printed `No tests were found!!!` even though `UnitTestsRtlFreeText` WAS registered in
+  `UnitTests/CTestTestfile.cmake` — lowercase guess ≠ registered name. Use the exact
+  registered target name or a casing-correct prefix (`-R UnitTestsRtlFreeText`). When a
+  new test "isn't found", grep `UnitTests/CTestTestfile.cmake` for `add_test` before
+  assuming registration failed.
+- **User-uploaded real-PDF test corpus lives OUTSIDE the repo** at
+  `/home/agent/workspace/test-pdfs/` — never commit those files, never copy into
+  `src/tests/fixtures/`. Baseline probes + the "Distiller PDFs may have NO ToUnicode →
+  empty fetch-text is a legit upstream limitation" check: `references/real-pdf-test-corpus-2026-08-08.md`.
 
 ## 5. Pitfalls (fuzz-crash class, learned the hard way)
 
@@ -138,6 +162,15 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
   BDC wrap: the layout generator replaces the full BDC..EMC glyph range, so a mixed
   LTR+RTL element would lose its unmarked runs), nesting stack with outermost-span-only
   recording, and the stale-test pin above.
+- **PDFObject API traps (core, hit 2026-08-08 M14 WS-A GREEN):** (1) there is
+  NO `PDFObject::isInteger()` — the type test is `isInt()` (with `getInteger()`).
+  (2) `PDFObject::getDictionary()` returns `const PDFDictionary*` — dereference
+  to copy, and NEVER call it on a `factory.takeObject()` temporary (dangling
+  pointer into a dying object); keep the PDFObject alive first. (3) `dict->get(
+  "missingKey")` returns a Null object and `.getString()`/`.getInteger()` on it
+  throws `std::bad_variant_access` (SIGABRT, exit 134) — always guard with
+  `isString()`/`isInt()` before reading (a widget without `/DA` is the real
+  case: DA is inheritable/optional).
 - **Visual-order lam-alef collapse (S#3) — search engine must normalize the FLOW in
   visual order, the QUERY in logical order.** Root cause of a real bug (`4cabbf7a`,
   2026-08-07) that made document-level `PDFTextSearchEngine::search` return 0 matches
@@ -389,6 +422,43 @@ pdfpagecontentelements.cpp:2654 as the textbox commit hook — superseded (build
 7b497852; real hook is finishEditing, pdfpagecontenteditortools.cpp:787-798). Full
 file:line map + gap list: `references/gui-text-wiring-audit-2026-08-07.md`.
 
+**GUI AppImage bundle audit (2026-08-08) — "why no editing features in the
+AppImage?" answer: the editor IS bundled, but the AppImage LAUNCHES THE VIEWER,
+and the deep page-content editor is a plugin we never vendored.** Verified by
+extracting the real 0.3.0 AppImage (`APPIMAGE_EXTRACT_AND_RUN=1
+./dist/albdf-0.3.0-x86_64.AppImage --appimage-extract`):
+- `usr/bin/albdf-editor` + `libPdf4QtLibCore|Gui|Widgets.so.1.6.0.0` ARE
+  present and run (aliveness smoke: `APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a
+  timeout 12 ./squashfs-root/usr/bin/albdf-editor <pdf>` → exit 124 = alive
+  the full 12s = good). So the editor was NOT left out of the bundle.
+- **Root cause 1 — default entry point is the viewer:** only
+  `packaging/albdf-viewer.desktop` exists and `build-appimage.sh` uses
+  `--executable .../albdf-viewer`, so double-clicking the AppImage opens the
+  VIEWER, which initializes `Features(TextToSpeech|Tools)` (pdfviewermainwindow
+  .cpp:233) — NO forms, NO undo/redo. The editor initializes
+  `PDFProgramController::AllFeatures` (pdfeditormainwindow.cpp:294) → full
+  annotation toolset + forms + undo/redo + plugins. Fix ≈ 15-30 min: add
+  `albdf-editor.desktop`, point `--executable` at albdf-editor, rebuild.
+- **Root cause 2 — page-content editor is a runtime plugin we never
+  vendored:** the canvas editor (`PDFPageContentScene`, defined in
+  pdfpagecontentelements.h:544) + `PDFPageContentEditorWidget` are NOT wired
+  into the editor binary. Upstream loads them from
+  `Pdf4QtEditorPlugins/EditorPlugin` via `PDFProgramController::loadPlugins()`
+  (pdfprogramcontroller.cpp:2495, QPluginLoader on `<appDir>/pdfplugins/*.so`,
+  `PDF4QT_PLUGINS_DIR` = `${PDF4QT_INSTALL_LIB_DIR}/pdfplugins`). Our
+  src/CMakeLists.txt:114 intentionally does NOT wire Pdf4QtEditorPlugins (168
+  files / 9 plugins: EditorPlugin, Redact, Signature, ObjectInspector,
+  Scanner, Dimensions, OutputPreview, SoftProofing, AudioBook). ALL
+  EditorPlugin deps are already vendored + building → vendoring is CMake +
+  bundling, NOT a code port.
+- **Effort:** A) launch editor by default ≈ 15-30 min; B) vendor EditorPlugin
+  ≈ 0.5-1 day; C) all 9 plugins ≈ 1-1.5 days; D) + update GUI from latest
+  upstream adds 31 GUI files of merge surface. **Sequence caveat:**
+  EditorPlugin depends on `pdfpagecontenteditorprocessor.{cpp,h}` — the exact
+  file upstream `ca6f467a` (Issue #238) modifies → do the upstream core sync
+  BEFORE vendoring EditorPlugin. Full inventory + verification technique:
+  `references/gui-appimage-bundle-audit-2026-08-08.md`.
+
 ## 8. Form-field appearance streams (M14, WS-A) — verified headless reality
 
 **Headless form-fill emits NO appearance stream at all — not tofu.** Verified
@@ -434,16 +504,48 @@ objects; compress the fragment with `PDFFlateDecodeFilter::compress` →
 Pick a free `F<N>` key by resolving the target `/Resources` (which may be an
 INDIRECT reference) — the RTL font must not collide with existing keys.
 
-**Open decision (not yet resolved — session ended before GREEN):** core
-`fonts.qrc` bundles ONLY Liberation fonts (Latin) — there is no Arabic font in
-core resources. The RTL AP path needs a font source; candidate options are (a)
-vendor an OFL Arabic font into `fonts.qrc`, (b) add a `--font` option to the
-`form-fill` CLI (mirrors add-text), or (c) plumb fontData through the
-`PDFFormManager`/builder. Also undecided: whether the builder's `m_formManager`
-is set in the CLI path (pdftoolformfill.cpp does NOT call
-`modifier.getBuilder()->setFormManager(...)` — verify before relying on
-`getFormFieldForWidget` inside `updateAnnotationAppearanceStreams`; reading `/V`
-straight from the builder storage avoids the dependency).
+**Font-source decision RESOLVED + RED DONE (2026-08-08, WS-A continuation):**
+the `form-fill` CLI gains a `--font <ttf>` option (mirrors add-text's
+`addTextFont`) — this is the chosen font source (option (b); decided in the
+task brief, NOT re-litigated). `m_formManager` IS nullptr in the CLI path
+(confirmed: pdftoolformfill.cpp:147-148 never calls
+`modifier.getBuilder()->setFormManager(...)`), so `getFormFieldForWidget` is
+unusable inside `updateAnnotationAppearanceStreams` — read `/V` straight from
+the builder storage (`PDFDocumentDataLoaderDecorator::readString` on the widget
+object, or `m_storage.getObject`). RED test `test_formFillRtlAppearance`
+implemented + committed `e2efc315` (slot in tst_formsignaturetest.cpp +
+`TEST_FONT_ARABIC` compile def on UnitTestsFormSignature; verified FAILING:
+`exitCode 1` at tst_formsignaturetest.cpp:227, "0% tests passed"). GREEN NOT
+yet done. **NEW PITFALL: `QCommandLineParser::process()` (main.cpp:61) exits
+1 — NOT exit 7/ErrorInvalidArguments — on an UNREGISTERED option**
+(stderr `albdf: Unknown option 'font'.`, no output file). So a RED test that
+exercises a CLI option which doesn't exist yet fails at the exit-code QCOMPARE
+first, not at the byte-scan — that's expected RED behavior, don't "fix" it.
+
+**WS-A form-field RTL AP — GREEN (2026-08-08, fix `21c42879` + docs
+`285deab9`):** implemented per the plan above (early-return after the highlight
+block; private helper `updateRtlFormFieldAppearanceStream` walks widget→`/Parent`
+for `/FT /Tx` + `/V` string; AP built DIRECTLY via
+`PDFRTLTextEngine::create(settings, "F2")`; Form XObject + `/AP << /N ... >>` +
+`/Rect` merged; `/V` read from builder storage, never `getFormFieldForWidget` —
+`m_formManager` is nullptr in the CLI path, confirmed). Three real compile/crash
+fixes found during GREEN (all core-API traps, see §5): `PDFObject::isInteger()`
+DOES NOT EXIST → `isInt()`; `PDFObject::getDictionary()` returns
+`const PDFDictionary*` (dereference to copy — and never on a `takeObject()`
+temporary: dangling); unguarded `dict->get("DA").getString()` on a widget
+without /DA throws `std::bad_variant_access` (SIGABRT) — guard `isString()`.
+Design additions: language SNIFFED from the value (Hebrew block 0x0590-0x05FF →
+"he", else "ar") — NEVER pass '' for form APs (engine base direction stays LTR
+for '' and script defaults to hb "Arab", wrong for Hebrew); `/Q` quadding
+(1 = centered, 2 = right-anchored) honored via measure-then-shape two-pass
+using new additive `Result::boundingWidth` (engine {h,cpp}, 2 lines). CLI:
+`form-fill --font <ttf>` → builder setter `setRtlFormFieldFontData(QByteArray)`
+(missing file → exit 7); format-gate exclusion widened to
+`pdfdocumentbuilder\.(cpp|h)`. Verified: 16/16 ctest; output bytes contain
+`/AP` `/FontFile2` `/Type0` `/Subtype /Form` + raw-UTF-8 `/V`; byte-deterministic
+sha256; LTR fills unchanged (no AP — baseline preserved); bad font → exit 7;
+format gate ALL GREEN (43 files). Full record (helper logic, CRLF byte-exact
+edit recipe, verification transcript): `references/form-field-rtl-appearance-green-m14.md`.
 
 **RED-test recipe (designed, fixture-verified):** extend the EXISTING
 `tst_formsignaturetest.cpp` suite with a private slot (no new CMake target —
@@ -465,27 +567,70 @@ inside PDFContentStreamBuilder :1526-1534 and cannot embed Type0/FontFile2 into 
 edit `pdfannotation.cpp`. Full session record (code-path quotes, probe output,
 CLI recipe): `references/form-field-appearance-streams-m14.md`.
 
-**WS-B FreeText RTL AP (M14) — design SOURCE-VERIFIED at e667fe0a, impl pending
-(2026-08-08):** additive early-return after the highlight block (:1497-1505):
+**WS-B FreeText RTL AP (M14) — GREEN (2026-08-08, `507ff443` fix + `56536fe7`
+docs):** additive early-return after the highlight block (:1497-1505):
 `dynamic_cast<const PDFFreeTextAnnotation*>` + `getContents().isRightToLeft()`
 (precedent pdfwidgettool.cpp:912) → build the AP form stream via
 `PDFRTLTextEngine::create(settings, "F2")` (logical contents; fontSize/family from
 `PDFAnnotationDefaultAppearance::parse(getDefaultAppearance())`, fallbacks 12/
 "Helvetica"; origin 0,0) + `replaceObjectsByReferences(fontDictionary)` + `mergeTo`
-(mirror :1743-1792); LTR QPainter path falls through byte-identical. GOTCHA vs
-WS-A: the branch compiles into the CORE lib, which has NO `TEST_FONT_ARABIC`
-compile def (those exist only on UnitTests targets) —
-`src/Pdf4QtLibCore/CMakeLists.txt` has no `target_compile_definitions` at all and
-needs one, or a plumbed font path (open decision at GREEN time). Full verified API
-map + RED-test recipe (core-level, reopen → `getCatalog()->getPage(0)`
-`->getAnnotations()` → `PDFAnnotation::parse` → walk /AP /N form /Resources /Font
-for `/Subtype /Type0` + `/FontDescriptor /FontFile2`):
+(mirror :1743-1792); LTR QPainter path falls through byte-identical (WIP diff
+purely additive — 0 deletions in pdfdocumentbuilder.cpp — confirmed). The core
+GOTCHA resolved by PLUMBING, not a compile def: `setRtlFreeTextFontData(QByteArray)`
+on the builder (test loads the TTF at runtime) — `src/Pdf4QtLibCore/CMakeLists.txt`
+stays untouched; do NOT add `TEST_FONT_ARABIC` there. **Type0 AP-walk PITFALL:**
+`/FontDescriptor` is NOT a direct key of the Type0 dict — it lives inside
+`DescendantFonts[0]` (the CIDFontType2 descendant); any "Type0 + FontFile2" walk
+must descend `/DescendantFonts[0]` → `/FontDescriptor` → `/FontFile2`. The RED
+test failed against a byte-correct output PDF (test-walk bug, impl was right) —
+inspect the actual output PDF bytes before touching the impl. Also: authored test
+files need `clang-format --dry-run --Werror` clean BEFORE committing (even RED
+commits — this RED test was never format-clean; the fix commit carried a
+whole-file reformat). Full verified API map + GREEN record:
 `references/freetext-rtl-appearance-m14.md`.
+
+**M14 MERGED to main (2026-08-08, merge `b1498640`; 17/17 green on the merged
+tree).** Two parallel branches both touched `pdfdocumentbuilder.cpp`
+`updateAnnotationAppearanceStreams` → merge-time conflict was EXPECTED and fully
+additive: keep BOTH early-return blocks (FreeText then form-field), keep BOTH
+`QByteArray` font-data members, and keep BOTH PROBLEMS.md entries. **PROBLEMS.md
+R# collision pitfall:** both M14 branches independently wrote an entry numbered
+**R#5** (FreeText vs form-field) — at merge, keep both and RENUMBER the second to
+R#6; never silently drop one. The `ci/run-ci.sh` format-gate exclusion line was
+also widened by WS-A from `pdfdocumentbuilder\.cpp` to `\.(cpp|h)` (the .h needed
+the exemption too) — check the exclusion regex when a branch touches a vendored
+header. Verify with `git merge-tree $(git merge-base main <b>) main <b>` BEFORE
+merging: only `REPO_MAP.md` conflicts per-branch (auto-generated → regenerate,
+don't hand-merge), but the two branches conflict on the builder files when merged
+together.
 
 ## 9. Upstream contribution feasibility (PR back to PDF4QT) — verified 2026-08-08
 
 Use when asked to contribute the RTL work (or any albdf feature) back to upstream, or to
 assess whether an upstream PR is viable. Full session record + strategy:
+`references/upstream-contribution-feasibility-2026-08-08.md`; re-runnable audit probe:
+`scripts/upstream-contribution-audit.sh`.
+
+**EXECUTED (2026-08-08, same day):** vehicle `yolka-wiz/pdf4qt-rtl` created (MIT fork via
+`gh api repos/JakubMelka/PDF4QT/forks -X POST` + PATCH rename — rename keeps the fork
+network), isolated checkout `/home/agent/workspace/pdf4qt-rtl`; PR #1 (`/ActualText`
+preservation) ported, built, tested 6/6, pushed, opened as **draft PR #414**. Dep verdict:
+KEEP harfbuzz+fribidi (Qt-native lacks glyph-cluster + bidi-reorder public APIs — empirical
+evidence). Port recipe with the `\r\r\n` double-CR trap, upstream core-only build recipe
+(the unguarded `qt_add_translations` CMake bug), upstream test pattern
+(`pdfconstants.h` include), PR body shape:
+`references/upstream-pr1-execution-2026-08-08.md`.
+
+## 10. Server-migration handoff (stop dev → everything remote on GitHub)
+
+When the user says "stop the development / upload the full current plan and
+issues and updated db to github / we want to move you to a better server /
+make sure everything is remote / create a repo for exporting your profile" —
+full exact-command sequence, WIP preservation, gitignored-DB export via a
+dedicated `handoff-migration` branch, plan-docs copy, profile-repo refresh,
+secret-hygiene grep, and the final verification loop (ls-remote + SQLite
+header probe, never trust a push line alone):
+`references/server-migration-handoff-2026-08-08.md`. Full session record + strategy:
 `references/upstream-contribution-feasibility-2026-08-08.md`; re-runnable audit probe:
 `scripts/upstream-contribution-audit.sh`.
 
@@ -496,11 +641,43 @@ assess whether an upstream PR is viable. Full session record + strategy:
 - CI: `.github/workflows/ci.yml` triggers ONLY on push-to-master + workflow_dispatch — **PRs get no CI checks**; local green on current master is the only evidence.
 - External PRs are rare but MERGED (nyalldawson ×4, Jan 2024, merged within days; raffaelemancuso ×3, 2023). All small fixes. Sole maintainer does direct `Issue #NNN` commits; active + responsive.
 - Upstream has **zero** bidi/Arabic code and NO harfbuzz/fribidi deps (vcpkg.json = 9 minimal deps) — RTL is genuinely new value.
+- **Upstream text pipeline is glyph-level, NO shaping (source-verified 2026-08-08):**
+  `PDFTextLayoutGenerator` is a `PDFPageContentProcessor` visitor
+  (`performOutputCharacter(PDFTextCharacterInfo)`, pdftextlayoutgenerator.cpp:72 →
+  `PDFTextLayout::addCharacter`); `QTextLayout` in ALL of core = exactly 2 hits (pdfform.h:32
+  include + pdfxfaengine.cpp XFA appearance); `QPainter::drawText` only render-side (RealText
+  feature pdfpagecontentprocessor.cpp:3253, annotation/XFA APs). Fonts realized via **FreeType
+  ALREADY linked** (pdffont.cpp, 114 `FT_*` sites; FT_New_Memory_Face/FT_Load_Glyph/
+  FT_Outline_Decompose), glyph 1:1, no GSUB/GPOS. Core links `Qt6::Core Gui Xml Svg` PRIVATE
+  (CMakeLists:183) — no Concurrent/Widgets. **Dep-add risk for harfbuzz+fribidi = MEDIUM**:
+  technically the canonical FreeType companion (consistent with the feature-driven dep policy —
+  vcpkg.json has 8 commits ever, stale 1.5.2 version-string, Qt deliberately NOT in manifest),
+  socially visible because "Qt 6 already bundles HarfBuzz/FriBidi" — PR rebuttal: QTextLayout
+  hides clusters/bidi-levels/GPOS offsets a PDF writer needs, and Qt text would be a second
+  parallel stack vs the FreeType one. Qt-native (QTextLayout+QRawFont) wins only on zero-dep
+  optics; wrong tool for PDF emission. Issue #240 (Hebrew filename) = GUI title-bar bug, never
+  fixed, closed 2026-07; #228 (reverse pages order) only arabic/persian-tagged issue; 0 commits
+  match hebrew/rtl/bidi. Full file:line map + Qt-native-vs-explicit table + integration map +
+  verification recipe: `references/upstream-text-pipeline-dep-posture-2026-08-08.md`.
 
 **Fork divergence (2026-08-08):** 153 ahead / **1,414 behind**. The fork vendored the tree
 under `src/` → plain `git diff upstream/master..HEAD` is dominated by 794 renames; only
 6 files are genuinely M (modified), of which exactly ONE is core-relevant:
 `pdftextlayoutgenerator.cpp`.
+
+**CRITICAL: the fork has NO git ancestry with upstream (verified 2026-08-08).**
+`git merge-base HEAD upstream/master` returns NOTHING (rc=1) — the repo was scaffolded
+fresh (root `caf795b7`, 2026-08-03) and PDF4QT was vendored as a FILE SNAPSHOT into `src/`
+at M1 (`6bf50473`, taken from ~2026-07-12 upstream state). Consequences: (1) `git pull` /
+`git merge upstream/master` is IMPOSSIBLE — two unrelated histories, ~1,400 commits of
+noise; (2) any upstream sync is a FILE-LEVEL re-vendor (copy upstream file versions into
+`src/`, re-apply our deltas on top); (3) the "1,414 behind" figure is a diff-level
+estimate, NOT an ancestry gap — never reason about it as a mergeable distance. Sync
+feasibility audit (2026-08-08): of 23 upstream commits since v1.6.0.0 only 4 core + 1 GUI
+are genuinely newer than our snapshot; 3 files are true both-sides conflicts (all additive,
+non-overlapping); the TTS commit `3b99b677` MUST be skipped (rewrites `pdftexttospeech.cpp`
+→ would resurrect the Qt TextToSpeech dep our stub `48d58fd8` removes). Full method +
+conflict table + recommended sequence: `references/upstream-sync-audit-2026-08-08.md`.
 
 **The RTL patch surface (measured):** 4 NEW files `pdfrtltextengine.{h,cpp}` (835 lines) +
 `pdfrtltextnormalizer.{h,cpp}` (378 lines) + the layoutgenerator delta (**+~60 real lines** —
@@ -527,9 +704,63 @@ GUI wiring only if #2 lands. If upstream says no, the patches live forever in th
 - `git describe --tags <merge-base>` returns the FORK's own tag (e.g. 0.3.0) because the base is an ancestor of the fork tag — it says nothing about the upstream base; compare against fetched upstream tags instead.
 - Blob-to-blob `git diff upstream/master:PATH src/PATH` is CRLF-noise-dominated when one side stored CRLF — always add `-w -B` (and `--ignore-space-at-eol`) and read the semantic delta; trust neither the stat nor raw output.
 - `git diff --name-status` has rename detection ON by default → a tree move shows as R entries; the M (modified) list is the only thing that tells you which upstream files actually changed.
+- **Tree-vs-tree `git diff <ref1>:<dir> <ref2>:<dir>` is unreliable when path prefixes differ** (`Pdf4QtLibCore/` vs `src/Pdf4QtLibCore/`): it reports 384 files / 549k insertions for a CRLF-only change, and `--name-only` floods with the whole tree. GROUND TRUTH: `git archive <ref> <dir> | tar -x -C /tmp/x` then `diff -r -q --strip-trailing-cr /tmp/x/Pdf4QtLibCore/sources /tmp/our/.../sources`. **Use ABSOLUTE paths in that diff** — a relative path (e.g. `our-core/...` run from the repo dir) silently yields "0 diff-lines" for every candidate commit (bogus all-match, hit 2026-08-08).
+- **Verify the path exists in BOTH trees before a blob comparison**: `git diff <ref>:<nonexistent-path> src/...` prints nothing and rc=0 → a `$(...)` emptiness check false-positives "MATCH" on the first candidate (hit: lowercase `pdf4qtlibcore/...` matched `3b99b677` instantly). Check `git ls-tree --name-only <ref> <dir>` first.
+- **Per-file conflict attribution:** for each upstream-changed file, `git diff -w --ignore-cr-at-eol --quiet upstream/master:PATH HEAD:src/PATH` (empty → clean-take), then `git log --oneline <base>..upstream/master -- <file>` vs `git log --oneline 6bf50473..HEAD -- src/<file>` to separate upstream's change from ours. This is what classifies clean-take / keep-ours / true-both-sides-conflict.
+- **Case-insensitive 3-letter greps false-positive on substrings** (hit 2026-08-08):
+  `git grep -i 'RTL'` matches `sta**rtL**ineEnding` all over pdfannotation.cpp, and
+  `-i 'SearchEngine'`-style patterns are equally noisy — a `-l` file list is NOT evidence.
+  When proving "upstream has no X", read the actual matched lines; the only real
+  RightToLeft token in core is `pdfcatalog.cpp:403` (`/ViewerPreferences /Direction`
+  page-spread, NOT text bidi).
+
+## 11. Upstream re-vendor EXECUTION (3-way merge-file method) — VERIFIED 2026-08-08
+
+The sync *analysis* (which commits, conflict surface, TTS skip) is §10 + `references/upstream-sync-audit-2026-08-08.md`. This section is the **how-to** for actually re-vendoring the files, proven on the 4-commit sync (`a4d934b3`). Full worked example: `references/upstream-revendor-execution-2026-08-08.md`.
+
+**Classify first** (per file: `git log --oneline <base>..upstream/master -- <file>` vs ours) into **clean take** (upstream only), **keep ours** (us only), **3-way merge** (both). Then:
+
+1. **Clean takes** — files upstream changed, we never touched: `git show upstream/master:Pdf4QtLibCore/sources/<f> > src/Pdf4QtLibCore/sources/<f>`, then **restore CRLF** if the vendored tree stores CRLF: `sed 's/$/\r/'`. Without the restore the diffstat explodes into thousands of line-ending churn lines (real: pdffont.cpp showed 7,602 "changed" lines; the semantic delta was **1 line**). Verify with `git diff --stat` — it must be tiny.
+2. **3-way merges** — files BOTH sides changed: no shared ancestry means no `git merge`, but `git merge-file` gives real 3-way semantics. For each file: extract base (`git show <snapshot-base>:Pdf4QtLibCore/sources/<f>` — the upstream commit our vendored tree derives from), theirs (`git show upstream/master:...`), ours (current working file). **CRITICAL: LF-normalize all three sides first** (`sed 's/\r$//'`) — otherwise merge-file reports a WHOLE-FILE conflict on every file (real: 3,501-line conflict region on pdfdocumentbuilder.h caused purely by CRLF-vs-LF). Then `git merge-file -p ours base theirs > result`, restore CRLF if the vendored file was CRLF, repeat per file.
+3. **Verify the merge ate NOTHING from either side** — the auto-merge can silently pick one side:
+   - `git diff -w --ignore-cr-at-eol --stat upstream/master:Pdf4QtLibCore/sources/<f> src/Pdf4QtLibCore/sources/<f>` must show ONLY your intended additions (e.g. +21/+54/+101 — our RTL deltas) and no deletions of upstream content.
+   - Grep merged files for BOTH sides' markers: our symbols (ActualText, updateRtl*, m_rtl*) AND upstream's (formatNumber, isTilingPatternProcessingAllowed, etc.).
+   - TTS skip guard after any GUI-adjacent re-vendor: `grep -c QTextToSpeech src/Pdf4QtLibCore/sources/<f>` == 0.
+4. **Format gate**: re-vendored upstream files fail `.clang-format` even untouched → add to the AUTHORED_FILES exclusion chain in `ci/run-ci.sh` (`grep -vE '^src/Pdf4QtLibCore/sources/<f>\\.(cpp|h)$'`). NEVER `clang-format -i` a re-vendored file. Use `ci/run-ci.sh --only-format` as the fast canary before the full gate. See the backslash-escape trap in §3.
+5. **Full gate + GUI**: run complete `ci/run-ci.sh` (Release + ASAN + format) AND `cmake --build src/build-gui -j8` + `gui-smoke.sh` — core headers like pdfdocumentbuilder.h are GUI dependencies, so a broken re-vendor surfaces there (real: 272/272 GUI targets, smoke green).
+
+**Which upstream commits are genuinely new:** diff our vendored tree against candidate upstream commits via extracted-tree comparison (see §10 measurement traps) — commits whose tree predates our snapshot base are already inside it. On 2026-08-08 only 4 core commits were new (12763887, ae9958bd, ca6f467a, 7300ed2d); `3b99b677` (TTS) was SKIPPED because the fork compile-outs TextToSpeech (`48d58fd8` divergence) — re-vendoring it would resurrect the unprovisioned module. Skip TTS commits by default.
+
+## 12. Real-PDF validation battery — `scripts/p4-battery.sh`
+
+When the user uploads real PDFs (or asks "does it work on real docs?"), run the battery: `bash scripts/p4-battery.sh <pdf> <search-term> [--expect-no-text]` — checks info rc, render determinism (sha256 two runs), fetch-text, search-text, add-text RTL determinism + searchability, exit-code contract. **User convention: uploaded test PDFs live at `/home/agent/workspace/test-pdfs/`, OUTSIDE the repo — never commit them, no gitignore entry needed** (see §4). Real-corpus facts (2026-08-08): Distiller Persian invoices can have **zero ToUnicode/Type0/FontFile2** → empty fetch-text is a legit upstream limitation, pass `--expect-no-text`; Chrome/Skia font showcases are excellent RTL-search regression docs (visual-order extraction expected). Render quirk: `albdf render <doc> <out>` drops `Image_N.png` next to the INPUT doc — use `--image-output-dir <dir>` for controlled output (see §5). Dispatch pattern that worked: one leaf subagent per PDF, script path + lam-alef/token-search traps in context, verify reports against the real binary.
 
 ## References
 
+- `references/upstream-pr1-execution-2026-08-08.md` — PR #1 execution record (2026-08-08):
+  vehicle creation (fork API + PATCH rename keeps fork network), the CRLF-safe port recipe
+  (semantic delta via `git diff -w --ignore-cr-at-eol`; the `\r\r\n` double-CR bug and its
+  detection/fix), upstream core-only build recipe (system Qt 6.8.2 + vcpkg; the unguarded
+  `qt_add_translations` CMake bug fix), upstream UnitTests pattern (`pdfconstants.h` include
+  for `PDF_STREAM_DICT_LENGTH`), PR #414 draft status, and the keep-harfbuzz+fribidi evidence
+  (QGlyphRun::stringIndexes empty, no public bidi-reorder API, Ts recalibration).
+- `references/upstream-text-pipeline-dep-posture-2026-08-08.md` — source-verified map of
+  upstream master's text pipeline (glyph-level visitor, no shaping; FreeType already linked;
+  QTextLayout/drawText render-only) + dependency posture (9-dep vcpkg.json, 8 commits ever,
+  stale version-string, Qt NOT in manifest, CI has no PR trigger) + dep-add risk = MEDIUM +
+  Qt-native-vs-harfbuzz/fribidi table + issue #240/#228 facts + PDFRTLTextEngine integration
+  map on upstream master + verification recipe.
+- `references/real-pdf-test-corpus-2026-08-08.md` — user-uploaded real-PDF corpus at
+  `/home/agent/workspace/test-pdfs/` (NEVER commit): baseline probes on the 3 uploaded
+  files, the Distiller-no-ToUnicode → empty-fetch-text finding (real upstream
+  limitation, not a bug), and the Chrome/Skia showcase as the good RTL-search
+  regression doc.
+- `references/upstream-sync-audit-2026-08-08.md` — pulling NEW upstream commits into the
+  fork (2026-08-08): the no-ancestry structural fact (`git merge-base` empty → sync =
+  file-level re-vendor, never `git pull`), the measured conflict surface (3 true
+  both-sides files, additive), the TTS-commit-to-skip rule, the sync sequence (M14 merge
+  first), the risk table, and the trap log (tree-diff path-prefix garbage, relative-path
+  silent-zero, nonexistent-path false match).
 - `references/upstream-contribution-feasibility-2026-08-08.md` — upstream PR feasibility
   session record (2026-08-08): upstream facts (MIT since 2025-04-27, no CLA, CI not on PRs,
   PR history), fork divergence measurements (153 ahead / 1,414 behind), the measured RTL patch
@@ -578,6 +809,13 @@ GUI wiring only if #2 lands. If upstream says no, the patches live forever in th
   version bump + hardcoded-version smoke trap, RELEASES.md/PLAN.md updates, full gate,
   deterministic tarball (build twice → identical sha256), annotated tag + push,
   `gh release create` with assets, and the fine-grained-PAT Contents:write gotcha.
+  **`gh release create` needs `--repo <owner>/<repo>` in a fork clone** (hit
+  2026-08-07, 0.3.0): with an `upstream` remote present, gh targets the UPSTREAM
+  repo for the Release object and fails with `tag 0.3.0 exists locally but has not
+  been pushed to JakubMelka/PDF4QT ... specify the --target flag` even though the
+  tag is on the fork. Fix: `gh release create 0.3.0 <assets> --repo
+  yolka-wiz/al-bdf-engine --title ... --notes ...` — then verify assets by
+  re-downloading and comparing sha256 (never trust the create response alone).
 - `references/feature-capability-map-2026-08-07.md` — what the vendored PDF4QT core
   already provides (PDFAnnotation create API, PDFDocumentTextFlow editing, image
   optimizer/compressor, page manipulator) vs what albdf exposes via CLI — the answer to
@@ -638,6 +876,15 @@ GUI wiring only if #2 lands. If upstream says no, the patches live forever in th
   where `ال` is the definite article), the grep-echo measurement trap, and the
   "works in CLI but not in test" triangulation path (kept tmpdir file →
   byte-compare → char-rect probe).
+- `references/gui-appimage-bundle-audit-2026-08-08.md` — what the 0.3.0
+  AppImage actually bundles (albdf-editor + all 3 libs ARE there and run), why
+  users see "no editing features" (AppImage launches the VIEWER by default;
+  viewer = `TextToSpeech|Tools` only), the deep page-content editor being a
+  never-vendored runtime plugin (Pdf4QtEditorPlugins, loaded from
+  `<bin>/pdfplugins/*.so`), the effort table (viewer-default fix 15-30 min /
+  EditorPlugin 0.5-1 day / all 9 plugins 1-1.5 days), and the reusable
+  AppImage verification recipe (extract → readelf NEEDED → xvfb timeout
+  aliveness, exit 124 = alive).
 - `references/appimage-packaging-2026-08-07.md` — packaging/ record: linuxdeploy +
   qt-plugin + appimagetool download URLs, the system-libs-vs-vcpkg check
   (`ldd` first — never blindly copy vcpkg `installed/*/lib`), the AppDir layout
@@ -655,3 +902,21 @@ GUI wiring only if #2 lands. If upstream says no, the patches live forever in th
   uncommitted edits → commit per-path in logical units → full verify). Lessons:
   same-checkout parallel agents can't edit the same files; capped agents are the
   norm; verify every "done" claim yourself.
+- `references/form-field-rtl-appearance-green-m14.md` — M14 WS-A GREEN record
+  (2026-08-08, fix `21c42879` + docs `285deab9`): the form-field RTL AP
+  implementation (helper dict-walk logic, measure-then-shape two-pass for /Q,
+  DA size 0→12, language sniff), the CRLF byte-exact python edit recipe that
+  preserved line endings with zero churn, the three PDFObject compile/crash
+  fixes, verification results (16/16, byte scan, deterministic sha256, LTR
+  control), and the verification-script double-encode trap (`"\xd8…".encode()`
+  ≠ bytes literal).
+- `references/upstream-revendor-execution-2026-08-08.md` — the HOW-TO for
+  re-vendoring upstream commits into the snapshot fork (§11): clean-take CRLF
+  restore, the LF-normalize-then-`git merge-file` 3-way recipe (whole-file
+  conflict when sides differ by CRLF), the ate-nothing verification (semantic
+  diff vs upstream = only our additions, both markers grepped, TTS guard), and
+  the format-gate exclusion step. Pair with `references/upstream-sync-audit-2026-08-08.md`
+  (the analysis: which commits, conflict surface).
+- `scripts/p4-battery.sh` — real-PDF validation battery (§12): info/render-
+  determinism/fetch-text/search/add-text-RTL/exit-codes in one script; use on
+  user-uploaded PDFs in `/home/agent/workspace/test-pdfs/` (never committed).

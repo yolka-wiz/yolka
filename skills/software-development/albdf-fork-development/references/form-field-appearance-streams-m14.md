@@ -3,8 +3,9 @@
 Session: delegated WS-A task on `m14/form-field-ap` (worktree
 `/home/agent/workspace/wt-m14-forms`, base `origin/main e667fe0a`). The session
 hit its tool budget BEFORE implementing GREEN — everything below is VERIFIED
-(source reads + real builds/runs) up to the point stated; the GREEN design is a
-plan, not a tested result.
+(source reads + real builds/runs) up to the point stated; the GREEN design was
+a plan, not a tested result. **GREEN since 2026-08-08: fix `21c42879` + docs
+`285deab9` — see `form-field-rtl-appearance-green-m14.md` in this directory.**
 
 ## Verified facts (do not re-verify)
 
@@ -115,26 +116,81 @@ The CLI add-text RTL driver is the working reference pattern:
 - Field name in the embedded fixture: `name` (object 8, merged field+widget,
   `/T (name)`, `/Rect [100 700 300 720]`).
 
-## Open decisions (session ended before GREEN)
+## Open decisions — RESOLUTION STATUS after WS-A continuation (2026-08-08)
 
-1. **Font source**: core `fonts.qrc` bundles only Liberation (Latin) — no Arabic
-   font in core. Options: (a) vendor an OFL Arabic font into fonts.qrc,
-   (b) add `--font` option to form-fill CLI mirroring add-text, (c) plumb
-   fontData through the builder/form manager. The RED test only needs the CLI to
-   accept a font; the manual CLI recipe in the task brief wants
-   `form-fill ... --value 'سلام'` to embed the font, which implies (b) or (a).
-2. **RTL detection**: engine sets `hasRTL` per run; for form APs decide
-   language (fa/ar/he/ur) — could sniff the first strong RTL char or default.
-3. **Positioning**: x-origin should respect widget `/Rect` (+ quadding DA if
-   present: `/DA (/Helv 0 Tf 0 g)` in the fixture — size 0 = auto).
+1. **Font source — RESOLVED: (b) `--font` CLI option on form-fill.** The task
+   brief explicitly chose this ("add --font option mirroring add-text"). CLI
+   loads the TTF and passes the bytes into the builder via a new setter (e.g.
+   `setFormFieldRtlFontData(QByteArray)` on PDFDocumentBuilder) so
+   `updateAnnotationAppearanceStreams` can reach it; do NOT vendor a font into
+   fonts.qrc and do NOT add compile defs to Pdf4QtLibCore (that was WS-B's
+   rejected path). RED test passes `--font` → at baseline the option does not
+   exist yet.
+2. **RTL detection — undecided, design hint**: engine sets `hasRTL` per run;
+   for form APs decide language (fa/ar/he/ur) — could sniff the first strong RTL
+   char or default. Test value `سلام` is Arabic.
+3. **Positioning — undecided, design hint**: x-origin should respect widget
+   `/Rect` (+ quadding DA if present: `/DA (/Helv 0 Tf 0 g)` in the fixture —
+   size 0 = auto).
 4. Widget `/Rect` is available via `annotation->getRectangle()`; the generic AP
    loop's BBox = `parameters.boundingRectangle` (the annotation rect in PDF page
    coords) — an RTL branch should mirror that (BBox = widget rect, text in the
    same PDF coordinate space).
 
-## Commit plan (per task brief, NOT executed)
+## RED implementation status (2026-08-08, WS-A continuation)
+
+- **Committed: `e2efc315`** — `test(forms): RED — RTL form-fill AP must embed
+  shaped font (M14)`. Contents: slot `test_formFillRtlAppearance` in
+  tst_formsignaturetest.cpp (fills `name` with `سلام` + `--font
+  <TEST_FONT_ARABIC>`, byte-scans for `/AP` + `/FontFile2`, form-list
+  round-trip asserting `سلام`) + `TEST_FONT_ARABIC` compile def added to
+  `UnitTestsFormSignature` in src/UnitTests/CMakeLists.txt (target had NO
+  compile defs before). Pre-commit hook regenerated REPO_MAP.md — let it ride.
+- **Verified failing at baseline**: `ctest -R UnitTestsFormSignature` →
+  `FAIL! : test_formFillRtlAppearance() ... Actual (fillResult.exitCode): 1,
+  Expected (0): 0` at tst_formsignaturetest.cpp:227; "6 passed, 1 failed;
+  0% tests passed". NOTE the failure mode: **exit code 1, NOT the byte-scan** —
+  because `QCommandLineParser::process()` (main.cpp:61) bails with
+  `albdf: Unknown option 'font'.` on an unregistered option (it never reaches
+  execute()). This is EXPECTED for a RED test exercising a not-yet-existing CLI
+  option; do not "fix" it by dropping --font from the test.
+- Build: `export VCPKG_ROOT=/home/agent/vcpkg-cache/vcpkg && cmake --build
+  src/build -j8 --target UnitTestsFormSignature` (reconfigures automatically
+  when CMakeLists.txt changed). Test run: `QT_QPA_PLATFORM=offscreen ctest
+  --test-dir src/build -R UnitTestsFormSignature --output-on-failure`.
+- GREEN not started (session hit tool budget after the RED commit).
+
+## GREEN design (source-verified API map — IMPLEMENTED 2026-08-08)
+
+Branch in `PDFDocumentBuilder::updateAnnotationAppearanceStreams`
+(pdfdocumentbuilder.cpp:1489), inserted AFTER the highlight block (:1505) and
+BEFORE the pageDictionary lookup (:1507), guarding ONLY the form-field path:
+`dynamic_cast<const PDFWidgetAnnotation*>(annotation.data())` (class at
+pdfannotation.h:1288) — the FreeText branch is WS-B's, never touch it.
+
+- Read `/V` from builder storage directly: `PDFDocumentDataLoaderDecorator
+  loader(&m_storage)` + `loader.readString(widgetDict->get("V"))` (readString
+  dereferences refs, pdfdocument.cpp:185-194). `/V` is already merged before AP
+  gen runs (pdfform.cpp:997 then :1003).
+- `PDFRTLTextEngine::create(settings, fontKey)` — fontKey "F2" (or a free
+  F<N>); then `replaceObjectsByReferences(fontDictionary)` (builder.h:353),
+  compress fragment via `PDFFlateDecodeFilter::compress`, build stream via
+  `PDFObject::createStream(PDFStream(dict, data))` (pdfobject.h:263),
+  `addObject` (builder.h:412), Form XObject dict via `mergeTo(formRef,
+  formFactory.takeObject())` (builder.h:452) with
+  `Type/XObject + Subtype/Form + BBox + Resources`, then
+  `mergeTo(annotationReference, {/Rect, /AP << /N formRef >>})`.
+- `PDFObjectFactory << QRectF` serializes as `[left, top, right, bottom]`
+  (pdfdocumentbuilder.cpp:946-949) — valid BBox array.
+- Widget rect: `annotation->getRectangle()` (pdfannotation.h:546).
+- Builder members at pdfdocumentbuilder.h:1659-1661 (`m_storage`, `m_version`,
+  `m_formManager`); `PDFDocumentModifier::getBuilder()` returns `&m_builder`
+  (h:1673) — same builder instance the CLI holds.
+
+## Commit plan (per task brief — ALL EXECUTED 2026-08-08: RED `e2efc315`, GREEN `21c42879`, docs `285deab9`)
 
 1. RED: `test:` commit with the failing slot + CMake def (verify it fails).
+   **DONE — `e2efc315` (see "RED implementation status" above).**
 2. GREEN: `fix(core): RTL form-field appearance streams via PDFRTLTextEngine
    (M14)` — smallest change in pdfdocumentbuilder.cpp form-field branch only.
 3. Update `docs/PROBLEMS.md` marking the form-field tofu gap resolved.

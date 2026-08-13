@@ -120,6 +120,29 @@ match table is empty (the header always prints the query). Parse the actual
 itself. Also: `search-text` output's `count=` is the true match count —
 trust it over eyeballing rows.
 
+## Real-PDF lam-alef probes: prove term PRESENCE before declaring a regression
+
+Probing a real uploaded PDF for the lam-alef trap (`search-text "سلام"/"الله"`)
+only means something if the term actually exists in the document. Chrome/Skia
+PDFs extract in visual order WITH presentation forms, so check every spelling
+before concluding 0 matches = regression:
+
+- logical `لا`/`لأ`/`لإ`, reversed-visual `ال` (the extracted ligature pair),
+  presentation-form ligatures `U+FBEA`–`U+FBED`, AND a glyph inventory (any
+  `ARABIC LETTER LAM` at all). Absence of ALL ⇒ 0 matches is correct behavior.
+- Observed on `b_fonts_showcase.pdf` (7-page Skia font showcase): only words
+  نمایش/فونتها/انجام/میگردد — ZERO lam chars in 14k chars of extraction →
+  `سلام`/`الله` = 0 matches was correct absence. Concluding "lam-alef trap
+  regression" from the 0 alone would have been a false alarm.
+- When the doc cannot exercise the path, synthesize it in /tmp (no repo
+  writes): `add-text "سلام" --rtl` on a copy → `fetch-text` must show `مالس`
+  (visual order, reversed lam-alef pair) → `search-text "سلام"` must return
+  ≥1 match with matched text `مالس`. This round-trip verified the S#3 fix
+  (4cabbf7a) end-to-end on the real binary. Reusable: `scripts/lamalef_probe.sh`.
+- Related: Skia PDFs extract with U+FBxx presentation forms; the engine's
+  normalizer folds them for search — e.g. `فونت` matches extracted `تنوف`.
+  The match TEXT is the normalized VISUAL string, not the query.
+
 ## GUI search/select/copy paths vs the engine (vendored GUI layer, M12)
 
 The GUI layer (`ALBDF_BUILD_GUI=ON`) does NOT use `PDFTextSearchEngine` anywhere.
@@ -300,6 +323,50 @@ Full walkthrough + fixture recipe + verification status:
 `references/m10-redact-verification.md`. Landed pixel-test suite recipe
 (scanlines, thresholds, coordinate math, test-by-test):
 `references/m10-redact-test-suite.md`.
+
+## Qt's own shaping/bidi — public-API alternative to explicit HB/FriBidi
+
+**Researched 2026-08-08 (Qt 6.8.2 system headers + Qt 6.8 source, verified
+via ldd):** QtGui ALREADY links and uses HarfBuzz on Linux (`libQt6Gui.so.6 →
+libharfbuzz.so.0`; `QTextEngine::shapeTextWithHarfbuzzNG` → `hb_shape_full`
+with shaper list graphite2/ot/fallback, RTL buffers reversed) and implements
+UAX #9 bidi itself (private `QBidiAlgorithm` in qtextengine.cpp — no fribidi
+anywhere). So "remove the explicit harfbuzz/fribidi dep" costs nothing at
+runtime — the app only ever linked `Qt6::Gui`. **Every data stream a Type0
+font needs is available via PUBLIC APIs**: `QTextLine::glyphRuns(from, length,
+QTextLayout::RetrieveGlyphIndexes|RetrieveGlyphPositions|RetrieveStringIndexes|RetrieveString)`
+→ `QGlyphRun::glyphIndexes()`, `positions()` (x AND y — GPOS
+mark offsets included), `stringIndexes()` (per-glyph first source-char, since
+6.5; gaps=ligatures, dups=decomposition), `sourceString()`, `rawFont()`,
+`isRightToLeft()`. ⚠️ **Probe-verified corrections (2026-08-08,
+`scripts/qt_rtl_probe.cpp`, Noto Naskh Arabic on system Qt 6.8.2):**
+(a) within an RTL run glyphs come back in **LOGICAL order with descending x**
+(س,ل,ا,م at x 17.6→0) — only the RUNS are visual order, so PDF emission
+needs a per-run reversal or x-sort;
+(b) plain `line.glyphRuns()` (default flags) returns **`stringIndexes()`
+EMPTY** — the RetrieveStringIndexes flag path is not yet probe-confirmed,
+don't bet a port on clusters without re-testing;
+(c) `QRawFont::advancesForGlyphIndexes(gids, SeparateAdvances)` ==
+`hb_font_get_glyph_h_advance` **byte-parity** → the `/W` array survives a
+port unchanged;
+(d) GPOS mark y-offsets ARE visible in `positions()` (fatha 3.14px off
+baseline) but value/sign differ from hb `y_offset` (−196u vs ~262u) →
+recalibrate the Ts pixel band;
+(e) `QRawFont::glyphIndexesForString` is an **UNSHAPED** cmap lookup.
+Usage-table verdicts per engine file:line + probe recipe:
+`references/qt-public-bidi-shaping-apis.md` → "Empirical probe addendum". ⚠️ Use **`QTextLine::glyphRuns()`**, NEVER
+`QTextLayout::glyphRuns()` — the layout-level overload merges runs into a
+QHash keyed by (fontEngine, flags) and returns hash order, not visual order.
+⚠️ `QTextLine` has NO `verticalAdvance` in any public header (internal
+QTextEngine concept); mark y-offsets come only from `positions()`. ⚠️
+`QRawFont::glyphIndexesForString()` is a raw CMAP lookup, NOT shaped — the
+division of labor is QTextLayout for shaping, QRawFont (loadFromData /
+fontTable since 6.7 / metrics for FontDescriptor) for embedding. ⚠️
+`QTextOption::SuppressHyphenation` does not exist in Qt 6 (Qt 5 flag).
+Full capability checklist, pipeline recipe, and research workflow:
+`references/qt-public-bidi-shaping-apis.md` (probe-verified corrections in
+its "Empirical probe addendum"); re-runnable verification:
+`scripts/qt_rtl_probe.cpp`.
 
 ## CLI fuzz harness (DB #30, M10 wave-2)
 
