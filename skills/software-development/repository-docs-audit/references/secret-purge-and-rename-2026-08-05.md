@@ -13,7 +13,7 @@ uv pip install --python ~/workspace/agent-env/bin/python git-filter-repo
 
 # mapping file: one 'old==>new' per line
 cat > /tmp/ctx7-key-replace.txt <<'EOF'
-ctx7sk-2c7fa156-7263-4e9a-95ac-ef0417f28179==>***REDACTED: CONTEXT7_API_KEY***
+ctx7sk-***REDACTED: see .env CONTEXT7_API_KEY***==>***REDACTED: CONTEXT7_API_KEY***
 EOF
 
 # run from repo root

@@ -65,6 +65,52 @@ behavior without needing the real daemons (or xray, or a subscription).
 Write it so a future session can run `bash scripts/smoke.sh` and see the
 aggregated JSON.
 
+## Control-plane additions (2026-08-13): URL management + effective config
+
+### Effective-config values (the apply-safety rule)
+
+`internal/config/store.go` `Values(group)` must return what the **daemon
+actually runs with**: env-file values win, missing keys fall back to **schema
+defaults**. Do NOT fall back to the console's own process env — the console's
+environment is unrelated to the daemon and was a real bug (settings form
+showed wrong/empty values, and `Update()` could write a broken partial env
+file). Rule: **file wins → schema default fills the rest** → the form shows
+the running config → Apply writes a complete, valid file and never clobbers
+an unset value into an empty string.
+
+### URL management (textarea + Apply UX)
+
+Viberayd's stock API has GET/POST `/api/urls` + DELETE `/api/urls/{line}`
+(1-indexed) but **no replace-all endpoint**. The console implements
+`PUT /api/viberayd/urls` by **diffing**: GET current list → DELETE lines that
+are gone (by line number) → POST lines that are new → GET final. Works
+against stock viberayd; no upstream dependency.
+
+- Client-side validation first: `validateURLList` rejects anything that is
+  not http(s) with a host (trim lines, drop blanks/comments). Invalid lines
+  → 400 with the offending entries, **before** touching the daemon.
+- Upstream hardening (Viberayd PR #7): `validSubscriptionURL` on add +
+  atomic `PUT /api/urls` replace (whole request rejected on any invalid
+  line — no partial writes, no silently dropped URLs). Runtime is already
+  safe: `FetchAndParse` continues per-URL on failure, so one dead sublink
+  never stops the daemon.
+
+### Go embedding + SPA serving gotchas
+
+- **`//go:embed` cannot use `..`** — pattern `all:../../static` fails with
+  "invalid pattern syntax". Static files must live **inside the package
+  directory** (`internal/dashboard/static/`); HTTP URL paths stay
+  `/static/*` so the HTML doesn't change.
+- **`http.FileServer` redirects `/` to `./` (301)** when the handler maps it
+  to a directory. Serve `index.html` bytes explicitly for `/` (read once via
+  `fs.ReadFile`, write with Content-Type text/html), FileServer only for
+  `/static/*`. Add a `static_test.go` asserting `/`, `/static/styles.css`,
+  `/static/app.js` all return 200.
+- **Supervisor lifecycle:** only the reaper goroutine calls `cmd.Wait()`;
+  `Stop()` waits on an exit channel the reaper closes (a second `Wait()`
+  from `Stop()` races and hangs the test). Missing env file at boot →
+  start with inherited env (log a warning) instead of failing.
+
 ## Env config (mirrors family style)
 
 `CONSOLE_LISTEN` (:8090), `CONSOLE_POLL_INTERVAL` (10s),

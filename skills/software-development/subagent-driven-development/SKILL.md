@@ -125,6 +125,32 @@ push) is verified by the orchestrator before the next phase starts.
      lies about the environment (e.g. AGENTS.md says vcpkg at /workspace/vcpkg
      but the machine has it at /home/agent/vcpkg-cache/vcpkg) — verify the
      real toolchain paths yourself in recon, then pin them in the context.
+   - **"Stage, don't commit" review mode (when the user says "have subagents
+     implement, test their output, give feedback").** Tell each child to make
+     its edits but NOT commit (`git add` nothing, leave work uncommitted), so
+     the whole batch is reviewable before anything hardens into history; the
+     orchestrator reverts wrong subagent changes cleanly, then commits ONE
+     coherent per-batch commit. This also stops a child's `git add -A` from
+     sweeping a sibling's (or another batch's) uncommitted files into its own
+     commit. Keep HEAD pinned at the last verified commit until the
+     orchestrator commits. (extfs-macos 2026-08-20, batches 1–3.)
+   - **Mac/Apple-target scaffolds: prove the Rust half CI-provable on Linux,
+     hold the Swift UNVERIFIED.** A workstream writing an FSKit/Swift adapter
+     can't compile Swift here, but its pure-stdlib core IS cross-checkable:
+     `rustup target add aarch64-apple-darwin && cargo build -p <core> --target
+     aarch64-apple-darwin` (builds, no Apple SDK) + `cargo check -p <capi>
+     --target aarch64-apple-darwin` (type-checks; linking still needs the SDK).
+     Make the macOS CI job gate on the Rust core build/test + cross-compile,
+     and the unsigned `xcodebuild` of the Swift NON-gating
+     (`CODE_SIGNING_ALLOWED=NO`, `RUSTFLAGS="-C panic=unwind"` for the staticlib
+     so FFI catch_unwind stays effective), Swift behavior marked UNVERIFIED and
+     held for a real Mac/VM. Statically grep-verify the Swift marshals to the
+     real exported C-ABI symbols since you can't run it. Details in
+     `references/extfs-shared-checkout-batch.md`.
+   - **Share one fuzz entrypoint between a fast PR smoke and a nightly
+     long-run via an env var** (`EXTFS_FUZZ_ITERATIONS`, default 400, fixed
+     seed): both call the same deterministic harness, nightly just sets a
+     bigger budget.
 5. **Verify each child's self-report before proceeding.** Self-reports are
    not facts: re-check the commit sha exists, re-run the test command or
    inspect its output, stat the file. Only then dispatch the next phase.
@@ -483,6 +509,30 @@ push) is verified by the orchestrator before the next phase starts.
   created via fine-grained PAT, contents PUT 403'd, SSH push succeeded.
   Note: profile README repos must be named exactly `<username>/<username>`
   to render on the profile page.)
+- **Re-running the orchestrator's OWN gate on the combined tree catches bugs
+  the children's scope-isolated runs can't.** When parallel agents work
+  disjoint scopes on ONE checkout (no worktrees), each child's
+  `cargo/ctest -p <crate>` only proves its own crate; a full `--workspace` run
+  integrates them and can expose errors neither child saw (extfs-macos
+  2026-08-20: a validation pass a child wired into `Filesystem::open` was
+  active for the whole workspace but its own tests only used 1 KiB-block images,
+  so it silently rejected real 4 KiB-block images the differential suite caught.
+  ALWAYS re-run the full workspace gate yourself after ALL children report,
+  before merging/committing.
+- **A green baseline can be config-blind — challenge a subagent's non-obvious
+  change with an empirical probe before reverting it.** Your own green test
+  suite is also a kind of self-report: it can pass while only ever exercising
+  one configuration of a code path. (extfs-macos: every fixture/differential
+  test used default 1 KiB-block images, so a hard-coded group-descriptor offset
+  of 2048 looked right while being WRONG for 4 KiB-block filesystems — ext4's
+  GDT lives at `(first_data_block+1)*block_size`, byte 4096 for `-b 4096`.) When
+  a parallel child "fixed" the constant, the orchestrator's FIRST instinct was
+  to revert it as scope-creep — the child was right, the orchestrator wrong.
+  When a child's change contradicts your assumption, don't revert on the basis
+  of "I know this". PROBE the real artifact (scan raw bytes of a real image /
+  second renderer / `readelf` / `dumpe2fs`) and let the artifact decide. The
+  orchestrator's baseline deserves independent verification exactly like a
+  child's self-report does. (See `references/extfs-shared-checkout-batch.md`.)
 
 ## Verification checklist
 
@@ -514,4 +564,18 @@ push) is verified by the orchestrator before the next phase starts.
   test-typo / expectation-pinning-bug / pre-existing-engine-bug → apply
   designed-but-unapplied edits → commit in logical units → clang-format the
   gate).
+- `references/extfs-shared-checkout-batch.md` — worked example (2026-08-20)
+  of verifying a parallel batch on one shared Rust checkout where the
+  ORCHESTRATOR's green baseline was config-blind: a child correctly fixed a
+  hard-coded ext4 group-descriptor offset the orchestrator reflexively wanted
+  to revert; plus the panic=abort-defeats-catch_unwind FFI trap, a
+  workspace-wide validation gap only the full integrated gate caught, and the
+  mke2fs `lost+found` differential false-positive. Read this before reverting
+  a subagent's non-obvious change to code you "know".
+- `references/repo-publish-ci-run.md` — publishing a fresh repo "so CI runs":
+  the committed-scripts-must-be-mode-100755 trap (CI fails `Permission denied`
+  / exit 126 on a fresh checkout), the zero-runs-after-create+push trap and
+  the `workflow_dispatch` kick, and verifying real job/step conclusions
+  (green run column can hide a skipped fuse job). Read before telling the user
+  a repo is "live on GitHub".
 

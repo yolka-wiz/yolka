@@ -93,6 +93,44 @@ Answer from the repo's OWN tracking docs — never from memory or invention:
    conventional commits. (User preference: findings in severity-table format,
    reviewed through an engineer's lens — SPOFs, drift, security.)
 
+## Authoring a documentation set from source
+
+The flip side of auditing: the user asks you to WRITE a repo's docs
+(`architecture.md`, feature matrix, security model, testing guide, platform
+setup, `REPO_MAP.md`) such that they accurately reflect the IMPLEMENTED state.
+Same ground-truth discipline as the audit, focused on not inventing features.
+
+1. **Discover the real repo path before assuming.** The workspace rule says never
+   guess `/workspace/<name>`; `find / -maxdepth 4 -name <dir> -type d` if a given
+   path doesn't exist. Also confirm with `git log` + `git ls-files` to see what
+   is actually committed.
+2. **READ the source, don't skim docs.** For facts (supported features, error
+   model, read path) read the actual `.rs`/scripts. Copy exact identifiers from
+   code (e.g. a `SUPPORTED_INCOMPAT` const list, an error-enum variant) rather
+   than paraphrasing the README — a reference/feature doc whose claims trace to
+   code is the whole point.
+3. **Verify README/layout claims against the real tree.** READMEs routinely list
+   dirs that don't exist yet. `ls -d` every dir in a layout block and every
+   claimed dir (`adapters/macos-fskit/`, `tests/`, `fuzz/` were empty
+   placeholders here). Report the gap in your summary so the parent isn't misled.
+4. **Distinguish implemented vs planned vs placeholder — and say so.** A module
+   can be a "skeleton bound" (e.g. a C-ABI crate defining `#[repr(C)]` types but
+   exporting no functions). State the implemented subset precisely; don't
+   describe the design doc's intent as shipped behavior.
+5. **Never claim a platform works.** If macOS/FSKit is unbuilt and unvalidated,
+   mark the setup doc UNVERIFIED prominently and give a future checklist
+   (prereqs, entitlement, build-stock-sample-first), not a status report. Expose
+   open questions explicitly.
+6. **Structure:** each markdown doc = one H1 + `##`-sectioned body (no
+   wall-of-text); add a small ASCII/Mermaid diagram for architecture and a
+   table for feature matrices. `REPO_MAP.md` at repo root = H1 + `##` sections,
+   one-line per crate/module/script, flags for placeholders/plans.
+7. **Finish by verifying** the created files exist and each opens with an H1
+   heading (`head -1`), and end your report listing every file you wrote PLUS
+   the exact source files you read to determine each fact.
+
+Detail + miniature worked example: `references/doc-set-authoring-from-source.md`.
+
 ## Pitfalls
 
 - **Gitignored tracking DB**: the DB can be the declared "source of truth"

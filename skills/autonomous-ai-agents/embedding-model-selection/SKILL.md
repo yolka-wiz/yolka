@@ -18,6 +18,19 @@ RAG knowledge bases, agent memory) when the target box is resource-constrained
 (e.g. 2 CPU cores, <2 GB RAM). The decision procedure below was validated on
 real measurements (2026-08-08); numbers are in the reference file.
 
+## Defaults by integration path
+
+- **agno / fastembed / vector-DB path**: **nomic-embed-text v1.5** (768-d, ~274MB,
+  Apache 2) is the default — fastembed + Ollama native, tiny, fast on CPU.
+  fastembed (v0.8.0) does NOT support Qwen3 embeddings, so Qwen3-Embedding needs
+  torch/GGUF as a heavier install.
+- **Multilingual corpus**: **BGE-M3** (1024-d, MIT) — best open MTEB + multilingual,
+  but ~2+GB; only if non-English RAG matters.
+- **New 2026 on-device option worth testing**: **EmbeddingGemma** (308M, 768→128
+  Matryoshka, Gemma license, runs on CPU).
+- **<2GB budget / max speed**: **BGE-small-en-v1.5** (384-d, ~0.5GB) — the measured
+  default below.
+
 ## Decision procedure (in this order)
 
 1. **List what the runtime supports first.** fastembed: `TextEmbedding.list_supported_models()`
@@ -49,6 +62,31 @@ real measurements (2026-08-08); numbers are in the reference file.
 
 Verdict pattern: on a 2-CPU / <2 GB budget, big models sit at the ceiling with
 no headroom for the rest of the stack — stay with a 384-d small model.
+
+## When RAM is NOT the binding constraint (embedder runs in its own project)
+
+The "<2 GB" rule applies only when the embedder shares a box with an LLM/other
+stack. If it runs in a **separate project / separate slot** (user said so
+explicitly — never shares RAM with the LLM), pick for QUALITY, not size. In that
+case the best agno/fastembed-supported choice is:
+
+- **mixedbread-ai/mxbai-embed-large-v1** ⭐ — 1024-d, 0.64 GB, Apache 2.0. Best
+  quality-per-footprint in fastembed's supported list; top English retrieval.
+  Wiring: `FastEmbedEmbedder(id="mixedbread-ai/mxbai-embed-large-v1")`.
+- Close rival: `BAAI/bge-large-en-v1.5` (1024-d, 1.2 GB, MIT). Mid option:
+  `nomic-embed-text-v1.5` (768-d). Only fall back to bge-small if budget returns.
+- fastembed still has NO Qwen3 support (verified 2026) — Qwen3-Embedding is the
+  MTEB leader but needs torch/GGUF and is the slow CPU path, so it's NOT the
+  agno fit. mxbai-large is the best quality that plugs in natively.
+- **mxbai query-instruction trap**: queries need the prefix
+  `Represent this sentence for searching relevant passages: {query}`;
+  documents embed bare. Skipping it silently degrades retrieval.
+- **Dim must match**: mxbai is `float[1024]`, not 384. If you previously indexed
+  with bge-small/nomic, FULL re-seed (never mix models in one vec0 table).
+- Full fastembed supported list (dims/sizes/licenses): qdrant.github.io/fastembed/examples/Supported_Models/
+  — top English dense by size: bge-small-* (384), arctic-embed-xs/s, all-MiniLM-L6-v2,
+  nomic v1.5-Q (768), bge-base-v1.5 (768), arctic-embed-m (768), nomic v1.5 (768),
+  mxbai-large (1024), arctic-embed-l (1024), bge-large-v1.5 (1024), multilingual-e5-large (1024).
 
 ## Pitfalls
 

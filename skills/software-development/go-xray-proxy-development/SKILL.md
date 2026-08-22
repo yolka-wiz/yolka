@@ -64,10 +64,22 @@ TLS/protocol handshake to the upstream proxy server**. Fixes, in impact order:
 
 ## Pitfalls
 
+- **Probe pre-filters can gate out the real test.** A cheap TCP-connect
+  pre-filter before an expensive protocol test (Viberayd's `TCPPing` before
+  xray) is a throughput optimization, NOT a correctness gate — on filtered/DPI
+  networks a direct TCP connect fails while the same host works fine through
+  the proxied test. If the pre-filter marks failures `unreachable` and *skips*
+  the authoritative test, the pool can never recover. Fix pattern (shipped
+  Viberayd PR #8): env toggle `DAEMON_TCP_PING` (default true preserves the
+  fast path; false → skip the pre-filter, test everything, no
+  unreachable-marking from the ping stage). General rule: a probe stage should
+  be skippable, and its failures should never be the only gate on the real
+  test.
 - **`net.Pipe` relay benchmarks deadlock** — `net.Pipe` is synchronous; an echo/relay loop with pipes cycles and hangs. Use functional tests with real TCP listeners instead of pipe-based benchmarks.
 - **xray UDP/DNS:** Viberoxy SOCKS5 front-end rejects UDP ASSOCIATE with REP 0x07 and xray inbound is `"udp": false` — DNS-over-proxy is real work, not a one-liner.
 - **Leak guard:** `IsXraySupported` excludes hysteria2/tuic/wireguard because `buildOutbound` maps them to `freedom` = direct egress = traffic leak. Never promote them without a real outbound.
 - **F-string trap in execute_code:** sed/awk commands containing `}` inside an f-string raise `SyntaxError: f-string: single '}' is not allowed`. Use `%`-formatting or a plain string for such commands.
+- **Config editor apply-safety:** settings form must show the daemon's *effective* config — file values, else schema defaults — never the console's own process env (`Values()` bug, fixed 2026-08-13). Full URL-replace-by-diff, validation, embed/FileServer gotchas: see `references/viber-console-backend.md`.
 
 ## Verification checklist (before declaring done)
 

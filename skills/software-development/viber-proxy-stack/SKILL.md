@@ -96,6 +96,20 @@ Viberoxy (flat package in repo root):
 - **Viberayd module path is `github.com/amirrezaalavi/Viberay`** (repo named
   Viberayd) — mechanical rename PR is open (PR #5); branch off main, sed
   `module` line + all imports + `go mod tidy`, verify full suite before PR.
+- **"WANs show as unreachable" on a live console is usually NOT the WANs.**
+  viberayd's `TCPPing` pre-filter does direct TCP connects and marks hosts
+  `unreachable` when they fail — on filtered/DPI networks (Iran) that can be
+  ~99% of configs while the same hosts work fine through xray, so viberoxy's
+  WANs stay healthy and the console shows the mass-`unreachable` pills in the
+  **Configs section** (the WAN section has no "unreachable" code path at all).
+  Diagnose by pulling `/api/overview` first, diffing deployed static assets
+  against the repo, then reading the renderer before touching any frontend.
+  Full recipe: `references/unreachable-wans-diagnosis.md`.
+  **FIXED 2026-08-15 (Viberayd PR #8): `DAEMON_TCP_PING` toggle** — default
+  `true` preserves the prefilter; `false` skips it and lets the xray test be
+  the authoritative judge (no unreachable-marking from the ping stage). Exposed
+  in the viber-console settings schema as a WebUI toggle. Trade-off: slower
+  cycles on huge subscriptions (every candidate costs an xray test).
 
 ## Roadmap status (plan `.hermes/plans/2026-08-11_viber-stack-features.md`)
 
@@ -107,6 +121,15 @@ Viberoxy (flat package in repo root):
 | 3 | Viberoxy latency fix (mux + NODELAY + AsIs) | ✅ MERGED (PR #5) |
 | 4 | Viberoxy split routing (`ROUTE_MODE` + domain lists) | ✅ MERGED (PR #6) |
 | 5 | viber-console bundle + WebUI | ✅ BUILT 2026-08-13 (`yolka-wiz/viber-console`); install/bundle layer (systemd, compose) still pending |
+| 6 | Viberayd URL validation + `PUT /api/urls` replace | ✅ PR #7 open (2026-08-13); console WebUI textarea+Apply uses diff-based replace against stock API so it works pre-merge |
+| 7 | Viberayd `DAEMON_TCP_PING` toggle (filtered-network fix) | ✅ PR #8 open (2026-08-15); console schema exposes it as a WebUI toggle |
+
+**Console URL/values work (2026-08-13):** viber-console gained a
+"Subscription URLs" textarea + Apply (PUT `/api/viberayd/urls`, diff-based
+replace through viberayd's GET/POST/DELETE), and the config `Values()`
+apply-safety fix — effective config = env-file values, else schema defaults
+(never the console's own process env). Details: `go-xray-proxy-development`
+→ `references/viber-console-backend.md`.
 
 **Viberayd merge-order caveat:** #5 (module rename) and #6 (threshold) both
 touch `internal/daemon/` — merging #5 first means #6 needs an import-path

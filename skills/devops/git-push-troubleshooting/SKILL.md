@@ -98,5 +98,23 @@ window without the multi-GB pack.
 ## Verification
 
 - `git push --dry-run origin <branch>` → exit 0
-- `git ls-remote origin refs/heads/<branch>` → lists the pushed sha
+- `git ls-remote origin refs/heads/<branch>` → lists the pushed sha; match it
+  against `git rev-parse HEAD` (a "pushed" exit code is not proof the ref
+  landed — confirm the remote SHA explicitly).
 - control push to a small known-good repo → exit 0
+
+## Pre-push secret hygiene (snapshot / sync repos)
+
+Before pushing any snapshot repo (identity sync, config backup, results dump),
+the scrubber that generated it often covers ONLY the primary credential (e.g.
+`build-identity.sh` replaces just the GitHub PAT). Other token shapes pass
+through **unscrubbed**: MCP server headers (`mcp_servers.*.headers.Authorization:
+Bearer <key>`, e.g. context7 `ctx7sk...`), provider API keys, base_url-embedded
+keys, `cron/jobs.json` content. So:
+
+1. `git diff config.yaml` (and any new metadata files) and grep for token/key/
+   secret shapes beyond the one you already know is handled.
+2. A value already truncated in the SOURCE config (contains `...`) is safe;
+   a full-length one is a leak — redact before commit, don't trust the scrubber.
+3. New `cron/jobs.json` / state files should be metadata only (prompts,
+   schedules, IDs) — no credentials; skim them before `git add -A`.
